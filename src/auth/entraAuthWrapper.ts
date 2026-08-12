@@ -64,7 +64,9 @@ export class EntraAuthenticatedInvoker implements ToolInvoker {
         toolName: request.toolName,
         error: {
           code: authError.code,
+          statusCode: authError.statusCode,
           message: authError.message,
+          isRetryable: authError.isRetryable,
           details: authError.details
         },
         meta: {

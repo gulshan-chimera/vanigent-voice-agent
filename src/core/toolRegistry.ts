@@ -1,5 +1,5 @@
 import { ToolDefinition } from "./types";
-import { ToolError, ToolNotFoundError } from "./errors";
+import { ToolError, ToolNotFoundError, ErrorCode } from "./errors";
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition<any, any>>();
@@ -7,7 +7,7 @@ export class ToolRegistry {
   register<TInput, TOutput>(tool: ToolDefinition<TInput, TOutput>): void {
     if (this.tools.has(tool.name)) {
       throw new ToolError(
-        "TOOL_ALREADY_REGISTERED",
+        ErrorCode.TOOL_ALREADY_REGISTERED,
         `Tool already registered: ${tool.name}`
       );
     }

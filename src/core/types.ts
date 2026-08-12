@@ -46,7 +46,9 @@ export interface ToolCallFailureResponse {
   toolName: string;
   error: {
     code: string;
+    statusCode: number;
     message: string;
+    isRetryable: boolean;
     details?: unknown;
   };
   meta: ToolExecutionMeta;

@@ -1,4 +1,4 @@
-import { ToolError, ToolValidationError } from "./errors";
+import { ToolError, ToolValidationError, HttpStatusCode } from "./errors";
 import { NoopToolLogger, ToolLogger } from "./logger";
 import { ToolRegistry } from "./toolRegistry";
 import {
@@ -13,7 +13,7 @@ export class ToolExecutor {
   constructor(
     private readonly registry: ToolRegistry,
     private readonly logger: ToolLogger = new NoopToolLogger()
-  ) {}
+  ) { }
 
   async execute<TOutput>(
     request: ToolCallRequest
@@ -115,7 +115,9 @@ export class ToolExecutor {
         toolName,
         error: {
           code: error.code,
+          statusCode: error.statusCode,
           message: error.message,
+          isRetryable: error.isRetryable,
           details: error.details
         },
         meta
@@ -128,7 +130,9 @@ export class ToolExecutor {
       toolName,
       error: {
         code: "TOOL_EXECUTION_ERROR",
+        statusCode: HttpStatusCode.INTERNAL_SERVER_ERROR,
         message: this.getErrorMessage(error),
+        isRetryable: false,
         details: this.serializeError(error)
       },
       meta

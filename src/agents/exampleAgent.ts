@@ -29,6 +29,24 @@ export class ExampleAgent {
       return `Sum is ${result.data.sum}`;
     }
 
+    if (message.startsWith("weather ")) {
+      const parts = message.replace("weather ", "").split(" ");
+      const city = parts[0];
+      const units = parts[1] === "fahrenheit" ? "fahrenheit" : "celsius";
+
+      const result = await this.toolkit.call<
+        { city: string; units: string },
+        { city: string; temperature: number; units: string; condition: string; humidity: number; windSpeed: number; windUnits: string; description: string }
+      >("weather.get", { city, units }, context);
+
+      if (!result.ok) {
+        return `Tool error (${result.error.code}): ${result.error.message}`;
+      }
+
+      const w = result.data;
+      return `Weather in ${w.city}: ${w.condition}, ${w.temperature}°${w.units === "fahrenheit" ? "F" : "C"}, Humidity: ${w.humidity}%, Wind: ${w.windSpeed} ${w.windUnits}`;
+    }
+
     const echo = await this.toolkit.call<{ message: string }, { echoed: string }>(
       "utility.echo",
       { message },
@@ -42,3 +60,4 @@ export class ExampleAgent {
     return `Echo: ${echo.data.echoed}`;
   }
 }
+
