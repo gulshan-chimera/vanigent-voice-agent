@@ -40,6 +40,11 @@ export interface KnowledgeBaseConfig {
   spHostname: string;
   spSitePath: string;
 
+  // Middleware
+  corsOrigins: string;
+  rateLimitMax: number;
+  rateLimitWindowMinutes: number;
+
   // Server
   port: number;
 }
@@ -62,6 +67,11 @@ export function loadConfig(): KnowledgeBaseConfig {
     // SharePoint
     spHostname: optionalEnv("SP_HOSTNAME", "chimeratechpvtltd.sharepoint.com"),
     spSitePath: optionalEnv("SP_SITE_PATH", "/sites/Corporate-Policies"),
+
+    // Middleware
+    corsOrigins: optionalEnv("CORS_ORIGINS", "*"),
+    rateLimitMax: parseInt(optionalEnv("RATE_LIMIT_MAX", "100"), 10),
+    rateLimitWindowMinutes: parseInt(optionalEnv("RATE_LIMIT_WINDOW_MINUTES", "15"), 10),
 
     // Server
     port: parseInt(optionalEnv("PORT", "3001"), 10),

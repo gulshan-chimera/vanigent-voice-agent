@@ -1,8 +1,11 @@
 import express from "express";
+import cors from "cors";
 import { loadConfig } from "./config.js";
 import { KnowledgeBaseSearchClient } from "./search/searchClient.js";
 import { SearchService } from "./search/searchService.js";
 import { createSearchRouter } from "./routes/searchRoute.js";
+import { requestLogger } from "./middleware/requestLogger.js";
+import { createRateLimiter } from "./middleware/rateLimiter.js";
 
 // ---------------------------------------------------------------------------
 // Knowledge Base Microservice — Entry Point
@@ -20,9 +23,12 @@ function main(): void {
   const app = express();
 
   app.use(express.json());
+  app.use(cors({ origin: config.corsOrigins }));
+  app.use(requestLogger);
+  app.use(createRateLimiter(config));
 
   // ── Health check ──
-  app.get("/api/health", (_req, res) => {
+  app.get("/api/v1/health", (_req, res) => {
     res.status(200).json({
       ok: true,
       service: "@vanigent/knowledge-base",
@@ -32,15 +38,15 @@ function main(): void {
   });
 
   // ── Search API ──
-  app.use("/api", searchRouter);
+  app.use("/api/v1", searchRouter);
 
   // ── Start server ──
   app.listen(config.port, () => {
     console.log(`[KNOWLEDGE-BASE] Service started on port ${config.port}`);
     console.log(`[KNOWLEDGE-BASE] Search endpoint: ${config.searchEndpoint}`);
     console.log(`[KNOWLEDGE-BASE] Index: ${config.searchIndexName}`);
-    console.log(`[KNOWLEDGE-BASE] Health: http://localhost:${config.port}/api/health`);
-    console.log(`[KNOWLEDGE-BASE] Search: POST http://localhost:${config.port}/api/search`);
+    console.log(`[KNOWLEDGE-BASE] Health: http://localhost:${config.port}/api/v1/health`);
+    console.log(`[KNOWLEDGE-BASE] Search: POST http://localhost:${config.port}/api/v1/search`);
   });
 }
 

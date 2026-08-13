@@ -1,131 +1,67 @@
-# Agent Toolkit: Generic Tool-Calling Framework (Node.js)
+# Vanigent Voice AI Toolkit Service
 
-This project provides a reusable, typed tool-calling framework for agent systems.
+This repository is a monorepo containing the microservices that power the Vanigent Voice AI agent platform.
 
-## What it gives you
+## Architecture
 
-- Common `ToolDefinition` interface for every tool
-- Central `ToolRegistry` for registration and discovery
-- Runtime validation hooks per tool
-- Unified `ToolExecutor` with normalized execution results
-- Shared `AgentToolkit` facade for all agents
-- Standardized request/response schema for tool invocations
-- Structured logging for start/success/failure events
-- Reusable Entra token injection wrapper for authenticated calls
-
-## Structure
+The project is structured as a set of independent, loosely-coupled microservices located in the `services/` directory.
 
 ```
-src/
-  core/
-    types.ts
-    errors.ts
-    logger.ts
-    toolRegistry.ts
-    toolExecutor.ts
-    agentToolkit.ts
-  auth/
-    entraAuthWrapper.ts
-  tools/
-    echoTool.ts
-    math/
-      addTool.ts
-    mockSecureTool.ts
-  agents/
-    exampleAgent.ts
-  tests/
-    mockTool.test.ts
-  index.ts
+Vaniget_Voice_AI_Toolkit_Service/
+├── services/
+│   ├── toolkit-framework/      # VAPI Webhook Handler & Tool Execution Service
+│   └── knowledge-base/         # RAG & Document Retrieval Service
 ```
 
-## Quick start
+### 1. Toolkit Framework (`services/toolkit-framework`)
+An Express microservice that acts as the bridge between VAPI (the voice AI provider) and our internal tools.
 
-1. Install dependencies:
+- **VAPI Webhook Endpoint:** Handles `assistant-request`, `function-call`, `end-of-call-report`, etc.
+- **Tool Registry & Executor:** A strongly-typed generic tool-calling framework.
+- **Tools:** Includes mathematical utilities and mock secure endpoints.
+- **Authentication:** Uses Entra ID for secure, authenticated tool invocations.
 
+### 2. Knowledge Base (`services/knowledge-base`)
+A dedicated microservice providing RAG (Retrieval-Augmented Generation) capabilities, powered by Azure AI Search and SharePoint.
+
+- **Search API:** Exposes endpoints to query the knowledge base.
+- **Caching:** Uses an LRU cache (10-minute TTL) to optimize frequently retrieved queries.
+- **Access Control:** Integrates Entra Group IDs to ensure users only see documents they have permissions for.
+- **Indexing Scripts:** Includes scripts to pull PDFs from SharePoint via Microsoft Graph API, redact PII via regex, and push to Azure AI Search.
+
+## Production Readiness
+
+Both services are equipped with standardized production middleware:
+- **CORS:** Controlled via the `CORS_ORIGINS` environment variable.
+- **Rate Limiting:** Protects endpoints from abuse (Default: 100 requests / 15 minutes).
+- **Request Logging:** Logs every HTTP call with a unique `x-request-id` trace ID.
+- **API Versioning:** All routes are versioned (e.g., `/api/v1/`).
+- **Health Checks:** Both services expose a `/api/v1/health` endpoint for monitoring.
+
+## Getting Started
+
+Each service is completely independent with its own `package.json`, `tsconfig.json`, and `.env.example`.
+
+### Running the Toolkit Framework
 ```bash
+cd services/toolkit-framework
 npm install
+npm run build
+npm run dev
 ```
 
-2. Build:
+### Running the Knowledge Base
+```bash
+cd services/knowledge-base
+npm install
+npm run build
+npm run dev
+```
 
+### Indexing SharePoint Documents
+To crawl SharePoint and index documents into Azure AI Search, navigate to the `knowledge-base` service and run:
 ```bash
 npm run build
+npm run index-docs
 ```
-
-3. Run demo:
-
-```bash
-npm start
-```
-
-4. Run toolkit test with mock tool:
-
-```bash
-npm test
-```
-
-## Core concepts
-
-### `ToolDefinition<TInput, TOutput>`
-
-Every tool implements:
-
-- `name`: globally unique tool name
-- `description`: plain language description
-- `validate(input)`: returns validated input or throws
-- `execute(input, context)`: performs business logic
-
-### `AgentToolkit`
-
-Agents use one entrypoint:
-
-```ts
-const result = await toolkit.call("math.add", { a: 2, b: 3 }, context);
-```
-
-This keeps all agents consistent and simplifies tracing, auditing, and testing.
-
-### Standard request schema
-
-`ToolCallRequest<TInput>` defines the invocation contract:
-
-- `requestId`
-- `toolName`
-- `input`
-- `context` (`agentId`, `traceId`, metadata, auth)
-- `createdAt`
-
-### Standard response schema
-
-`ToolCallResponse<TOutput>` is always normalized:
-
-- Success: `ok`, `requestId`, `toolName`, `output`, `meta`
-- Failure: `ok`, `requestId`, `toolName`, `error`, `meta`
-
-Metadata includes timing and trace fields for observability.
-
-### Logging and error handling
-
-`ToolExecutor` emits structured logs for:
-
-- `tool.call.started`
-- `tool.call.succeeded`
-- `tool.call.failed`
-
-All errors are normalized to stable error codes (`TOOL_NOT_FOUND`, `TOOL_VALIDATION_ERROR`, `TOOL_EXECUTION_ERROR`, `TOOL_AUTHENTICATION_ERROR`).
-
-### Entra auth wrapper
-
-Use `EntraAuthenticatedInvoker` to inject bearer tokens into all calls:
-
-```ts
-const authInvoker = new EntraAuthenticatedInvoker(toolkit, {
-  scopes: ["api://my-service/.default"],
-  tokenProvider
-});
-```
-
-The wrapper injects:
-
-- `context.auth.entra.accessToken`
-- `context.metadata.headers.Authorization`
+*(Ensure all required Microsoft Graph API credentials are set in your `.env` file first).*
