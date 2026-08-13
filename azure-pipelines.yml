@@ -1,0 +1,142 @@
+trigger:
+  branches:
+    include:
+      - main
+      - dev
+
+pr:
+  branches:
+    include:
+      - main
+      - dev
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Node version
+  nodeVersion: '22.x'
+  # Azure Resource variables (To be filled when App Service access is available)
+  azureSubscription: 'Your-Azure-Service-Connection-Name'
+  toolkitAppServiceName: 'vanigent-toolkit-app'
+  knowledgeBaseAppServiceName: 'vanigent-kb-app'
+
+stages:
+  - stage: Build_And_Test
+    displayName: 'Build and Test Microservices'
+    jobs:
+      - job: Build_Toolkit_Framework
+        displayName: 'Build & Test Toolkit Framework'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '$(nodeVersion)'
+            displayName: 'Install Node.js'
+
+          - script: |
+              npm ci
+              npm run build
+              npm run test
+            workingDirectory: 'services/toolkit-framework'
+            displayName: 'Install, Build, and Test Toolkit'
+
+          # Package the built files (excluding src and devDependencies) for deployment
+          - script: |
+              npm prune --production
+            workingDirectory: 'services/toolkit-framework'
+            displayName: 'Prune dev dependencies for deployment artifact'
+
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: 'services/toolkit-framework'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/toolkit-framework-$(Build.BuildId).zip'
+              replaceExistingArchive: true
+            displayName: 'Zip Toolkit Framework Artifact'
+
+          - publish: $(Build.ArtifactStagingDirectory)/toolkit-framework-$(Build.BuildId).zip
+            artifact: toolkit-framework-artifact
+            displayName: 'Publish Toolkit Framework Artifact'
+
+      - job: Build_Knowledge_Base
+        displayName: 'Build Knowledge Base'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '$(nodeVersion)'
+            displayName: 'Install Node.js'
+
+          - script: |
+              npm ci
+              npm run build
+            workingDirectory: 'services/knowledge-base'
+            displayName: 'Install and Build Knowledge Base'
+
+          - script: |
+              npm prune --production
+            workingDirectory: 'services/knowledge-base'
+            displayName: 'Prune dev dependencies for deployment artifact'
+
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: 'services/knowledge-base'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/knowledge-base-$(Build.BuildId).zip'
+              replaceExistingArchive: true
+            displayName: 'Zip Knowledge Base Artifact'
+
+          - publish: $(Build.ArtifactStagingDirectory)/knowledge-base-$(Build.BuildId).zip
+            artifact: knowledge-base-artifact
+            displayName: 'Publish Knowledge Base Artifact'
+
+  # -------------------------------------------------------------------------
+  # DEPLOYMENT STAGE (Currently disabled pending Azure App Service access)
+  # -------------------------------------------------------------------------
+  #
+  # To enable deployment:
+  # 1. Update the 'azureSubscription' variable at the top with your Service Connection.
+  # 2. Update the 'toolkitAppServiceName' and 'knowledgeBaseAppServiceName' variables.
+  # 3. Uncomment the stage below.
+  #
+  # - stage: Deploy
+  #   displayName: 'Deploy to Azure App Service'
+  #   dependsOn: Build_And_Test
+  #   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  #   jobs:
+  #     - deployment: Deploy_Toolkit
+  #       displayName: 'Deploy Toolkit Framework'
+  #       environment: 'production'
+  #       strategy:
+  #         runOnce:
+  #           deploy:
+  #             steps:
+  #               - download: current
+  #                 artifact: toolkit-framework-artifact
+  #               - task: AzureWebApp@1
+  #                 inputs:
+  #                   azureSubscription: '$(azureSubscription)'
+  #                   appType: 'webAppLinux'
+  #                   appName: '$(toolkitAppServiceName)'
+  #                   package: '$(Pipeline.Workspace)/toolkit-framework-artifact/toolkit-framework-$(Build.BuildId).zip'
+  #                   runtimeStack: 'NODE|22-lts'
+  #                   startUpCommand: 'npm run start'
+  #
+  #     - deployment: Deploy_KnowledgeBase
+  #       displayName: 'Deploy Knowledge Base'
+  #       environment: 'production'
+  #       strategy:
+  #         runOnce:
+  #           deploy:
+  #             steps:
+  #               - download: current
+  #                 artifact: knowledge-base-artifact
+  #               - task: AzureWebApp@1
+  #                 inputs:
+  #                   azureSubscription: '$(azureSubscription)'
+  #                   appType: 'webAppLinux'
+  #                   appName: '$(knowledgeBaseAppServiceName)'
+  #                   package: '$(Pipeline.Workspace)/knowledge-base-artifact/knowledge-base-$(Build.BuildId).zip'
+  #                   runtimeStack: 'NODE|22-lts'
+  #                   startUpCommand: 'npm run start'
