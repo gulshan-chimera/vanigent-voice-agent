@@ -28,5 +28,12 @@ Thumbs.db
 .eslintcache
 *.tsbuildinfo
 
+AGENTS.md
+CLAUDE.md
+graphify-out/
+.claude/
+.codex/
+
+HR Agent/
 # Delta sync state (local per-machine)
 .sync-state.json
