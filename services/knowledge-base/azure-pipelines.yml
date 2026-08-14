@@ -21,8 +21,8 @@ pool:
 
 variables:
   nodeVersion: '22.x'
-  azureSubscription: 'Your-Azure-Service-Connection-Name'
-  appName: 'vanigent-kb-app'
+  azureSubscription: 'AzureServiceConnection-Vanigent'
+  appName: 'VanigentAI-DEV'
 
 stages:
   - stage: Build_And_Test
@@ -61,26 +61,26 @@ stages:
             displayName: 'Publish Artifact'
 
   # -------------------------------------------------------------------------
-  # DEPLOYMENT STAGE (Disabled)
+  # DEPLOYMENT STAGE (Enabled)
   # -------------------------------------------------------------------------
-  # - stage: Deploy
-  #   displayName: 'Deploy to Azure App Service'
-  #   dependsOn: Build_And_Test
-  #   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-  #   jobs:
-  #     - deployment: Deploy_KnowledgeBase
-  #       environment: 'production'
-  #       strategy:
-  #         runOnce:
-  #           deploy:
-  #             steps:
-  #               - download: current
-  #                 artifact: knowledge-base-artifact
-  #               - task: AzureWebApp@1
-  #                 inputs:
-  #                   azureSubscription: '$(azureSubscription)'
-  #                   appType: 'webAppLinux'
-  #                   appName: '$(appName)'
-  #                   package: '$(Pipeline.Workspace)/knowledge-base-artifact/knowledge-base-$(Build.BuildId).zip'
-  #                   runtimeStack: 'NODE|22-lts'
-  #                   startUpCommand: 'npm run start'
+  - stage: Deploy
+    displayName: 'Deploy to Azure App Service'
+    dependsOn: Build_And_Test
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: Deploy_KnowledgeBase
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: knowledge-base-artifact
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(appName)'
+                    package: '$(Pipeline.Workspace)/knowledge-base-artifact/knowledge-base-$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|22-lts'
+                    startUpCommand: 'npm run start'
