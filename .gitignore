@@ -27,3 +27,6 @@ Thumbs.db
 .cache/
 .eslintcache
 *.tsbuildinfo
+
+# Delta sync state (local per-machine)
+.sync-state.json

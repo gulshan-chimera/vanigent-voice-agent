@@ -13,6 +13,7 @@
     "dev": "concurrently -k -n BUILD,APP -c cyan,green \"npm:build:watch\" \"npm:start:watch\"",
     "index-docs": "npm run build && node dist/scripts/indexDocuments.js",
     "sync-index": "npm run build && node dist/scripts/syncIndex.js",
+    "delta-sync": "npm run build && node dist/scripts/deltaSync.js",
     "clean": "if exist dist rmdir /s /q dist"
   },
   "dependencies": {
