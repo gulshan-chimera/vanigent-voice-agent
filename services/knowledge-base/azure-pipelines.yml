@@ -21,7 +21,7 @@ pool:
 
 variables:
   nodeVersion: '22.x'
-  azureSubscription: 'AzureServiceConnection-Vanigent'
+  azureSubscription: 'Ask-Vanigent(deb0200b-a9cf-458b-be30-20cb437c815a)'
   appName: 'VanigentAI-DEV'
 
 stages:
@@ -84,5 +84,6 @@ stages:
                     package: '$(Pipeline.Workspace)/knowledge-base-artifact/knowledge-base-$(Build.BuildId).zip'
                     runtimeStack: 'NODE|22-lts'
                     startUpCommand: 'npm run start'
+
 
 
