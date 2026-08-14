@@ -1,8 +1,7 @@
 trigger:
   branches:
     include:
-      - main
-      - dev
+      - develop
   paths:
     include:
       - services/knowledge-base/*
@@ -10,8 +9,7 @@ trigger:
 pr:
   branches:
     include:
-      - main
-      - dev
+      - develop
   paths:
     include:
       - services/knowledge-base/*
@@ -66,7 +64,7 @@ stages:
   - stage: Deploy
     displayName: 'Deploy to Azure App Service'
     dependsOn: Build_And_Test
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
     jobs:
       - deployment: Deploy_KnowledgeBase
         environment: 'vanigent-dev'
@@ -84,6 +82,7 @@ stages:
                     package: '$(Pipeline.Workspace)/knowledge-base-artifact/knowledge-base-$(Build.BuildId).zip'
                     runtimeStack: 'NODE|22-lts'
                     startUpCommand: 'npm run start'
+
 
 
 

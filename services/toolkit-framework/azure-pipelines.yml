@@ -1,8 +1,7 @@
 trigger:
   branches:
     include:
-      - main
-      - dev
+      - develop
   paths:
     include:
       - services/toolkit-framework/*
@@ -10,8 +9,7 @@ trigger:
 pr:
   branches:
     include:
-      - main
-      - dev
+      - develop
   paths:
     include:
       - services/toolkit-framework/*
@@ -67,7 +65,7 @@ stages:
   # - stage: Deploy
   #   displayName: 'Deploy to Azure App Service'
   #   dependsOn: Build_And_Test
-  #   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  #   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
   #   jobs:
   #     - deployment: Deploy_Toolkit
   #       environment: 'production'
@@ -85,3 +83,4 @@ stages:
   #                   package: '$(Pipeline.Workspace)/toolkit-framework-artifact/toolkit-framework-$(Build.BuildId).zip'
   #                   runtimeStack: 'NODE|22-lts'
   #                   startUpCommand: 'npm run start'
+
