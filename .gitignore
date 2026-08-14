@@ -27,3 +27,11 @@ Thumbs.db
 .cache/
 .eslintcache
 *.tsbuildinfo
+
+AGENTS.md
+CLAUDE.md
+graphify-out/
+.claude/
+.codex/
+
+HR Agent/
