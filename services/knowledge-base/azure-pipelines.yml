@@ -69,7 +69,7 @@ stages:
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
     jobs:
       - deployment: Deploy_KnowledgeBase
-        environment: 'dev'
+        environment: 'vanigent-dev'
         strategy:
           runOnce:
             deploy:
@@ -84,4 +84,5 @@ stages:
                     package: '$(Pipeline.Workspace)/knowledge-base-artifact/knowledge-base-$(Build.BuildId).zip'
                     runtimeStack: 'NODE|22-lts'
                     startUpCommand: 'npm run start'
+
 
