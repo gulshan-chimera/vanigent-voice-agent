@@ -18,8 +18,8 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-  nodeVersion: '22.x'
-  azureSubscription: 'Ask-Vanigent(deb0200b-a9cf-458b-be30-20cb437c815a)'
+  nodeVersion: '24.x'
+  azureSubscription: 'Ask-Vanigent-Dev'
   appName: 'VanigentAI-DEV'
 
 stages:
@@ -80,7 +80,7 @@ stages:
                     appType: 'webAppLinux'
                     appName: '$(appName)'
                     package: '$(Pipeline.Workspace)/knowledge-base-artifact/knowledge-base-$(Build.BuildId).zip'
-                    runtimeStack: 'NODE|22-lts'
+                    runtimeStack: 'NODE|24-lts'
                     startUpCommand: 'npm run start'
 
 
