@@ -4,6 +4,8 @@ import { loadConfig } from "./config.js";
 import { KnowledgeBaseSearchClient } from "./search/searchClient.js";
 import { SearchService } from "./search/searchService.js";
 import { createSearchRouter } from "./routes/searchRoute.js";
+import { SyncService } from "./sync/syncService.js";
+import { createSyncRouter } from "./routes/syncRoute.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 import { createRateLimiter } from "./middleware/rateLimiter.js";
 
@@ -18,6 +20,8 @@ function main(): void {
   const searchClient = new KnowledgeBaseSearchClient(config);
   const searchService = new SearchService(searchClient);
   const searchRouter = createSearchRouter(searchService);
+  const syncService = new SyncService();
+  const syncRouter = createSyncRouter(syncService);
 
   // ── Create Express app ──
   const app = express();
@@ -39,6 +43,7 @@ function main(): void {
 
   // ── Search API ──
   app.use("/api/v1", searchRouter);
+  app.use("/api/v1", syncRouter);
 
   // ── Start server ──
   app.listen(config.port, () => {
@@ -47,7 +52,10 @@ function main(): void {
     console.log(`[KNOWLEDGE-BASE] Index: ${config.searchIndexName}`);
     console.log(`[KNOWLEDGE-BASE] Health: http://localhost:${config.port}/api/v1/health`);
     console.log(`[KNOWLEDGE-BASE] Search: POST http://localhost:${config.port}/api/v1/search`);
+    console.log(`[KNOWLEDGE-BASE] Sync: POST http://localhost:${config.port}/api/v1/sync`);
   });
 }
 
 main();
+
+

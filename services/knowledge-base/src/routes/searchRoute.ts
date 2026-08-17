@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { SearchService } from "../search/searchService.js";
 import { KnowledgeBaseError, toErrorResponse } from "../errors.js";
 import type { SearchRequest } from "../search/types.js";
+import { authMiddleware } from "../middleware/authMiddleware.js";
 
 // ---------------------------------------------------------------------------
 // POST /api/search
@@ -10,7 +11,7 @@ import type { SearchRequest } from "../search/types.js";
 export function createSearchRouter(searchService: SearchService): Router {
   const router = Router();
 
-  router.post("/search", async (req: Request, res: Response): Promise<void> => {
+  router.post("/search", authMiddleware, async (req: Request, res: Response): Promise<void> => {
     try {
       const body = req.body as Partial<SearchRequest>;
 
@@ -34,3 +35,4 @@ export function createSearchRouter(searchService: SearchService): Router {
 
   return router;
 }
+

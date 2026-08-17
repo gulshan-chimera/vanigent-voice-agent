@@ -1,0 +1,85 @@
+trigger:
+  branches:
+    include:
+      - develop
+  paths:
+    include:
+      - services/Authentication/*
+
+pr:
+  branches:
+    include:
+      - develop
+  paths:
+    include:
+      - services/Authentication/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  nodeVersion: '24.x'
+  azureSubscription: 'Ask-Vanigent-Dev'
+  functionAppName: 'vanigent-ai-auth'
+
+stages:
+  - stage: Build_And_Test
+    displayName: 'Build Authentication Service'
+    jobs:
+      - job: Build
+        displayName: 'Build Auth'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '$(nodeVersion)'
+            displayName: 'Install Node.js'
+
+          - script: |
+              npm ci
+              npm run build
+            workingDirectory: 'services/Authentication'
+            displayName: 'Install and Build'
+
+          - script: |
+              npm prune --production
+            workingDirectory: 'services/Authentication'
+            displayName: 'Prune dev dependencies'
+
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: 'services/Authentication'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/authentication-$(Build.BuildId).zip'
+              replaceExistingArchive: true
+            displayName: 'Zip Artifact'
+
+          - publish: $(Build.ArtifactStagingDirectory)/authentication-$(Build.BuildId).zip
+            artifact: authentication-artifact
+            displayName: 'Publish Artifact'
+
+  # -------------------------------------------------------------------------
+  # DEPLOYMENT STAGE (Enabled)
+  # -------------------------------------------------------------------------
+  - stage: Deploy
+    displayName: 'Deploy to Azure Function App'
+    dependsOn: Build_And_Test
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    jobs:
+      - deployment: Deploy_Authentication
+        environment: 'vanigent-dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: authentication-artifact
+
+                - task: AzureFunctionApp@2
+                  inputs:
+                    connectedServiceNameARM: '$(azureSubscription)'
+                    appType: 'functionAppLinux'
+                    appName: '$(functionAppName)'
+                    package: '$(Pipeline.Workspace)/authentication-artifact/authentication-$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|24'
+

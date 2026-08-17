@@ -19,7 +19,6 @@ function buildPhoneVariants(rawNumber: string): string[] {
   // Strip all non-digit characters except leading +
   const digitsOnly = rawNumber.replace(/[^\d+]/g, "");
   variants.add(digitsOnly);
-  console.log('hello')
 
   // Without leading +
   if (digitsOnly.startsWith("+")) {

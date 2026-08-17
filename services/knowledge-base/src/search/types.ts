@@ -24,6 +24,8 @@ export interface SearchResult {
 
   /** PII-redacted document content (or the matched excerpt) */
   content: string;
+  contentVector?: number[];
+  parentFileId?: string;
 
   /** SharePoint folder the document came from */
   folder: string;
@@ -49,6 +51,8 @@ export interface IndexDocument {
   id: string;
   title: string;
   content: string;
+  contentVector?: number[];
+  parentFileId?: string;
   folder: string;
   GroupIds: string[];
 }
@@ -61,3 +65,4 @@ export interface RedactionResult {
   redacted: string;
   found: string[];
 }
+

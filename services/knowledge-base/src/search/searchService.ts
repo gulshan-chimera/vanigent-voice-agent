@@ -2,6 +2,8 @@ import { LRUCache } from "lru-cache";
 import { createHash } from "crypto";
 import { KnowledgeBaseSearchClient } from "./searchClient.js";
 import { SearchQueryError } from "../errors.js";
+import OpenAI from "openai";
+import { loadConfig } from "../config.js";
 import type {
   SearchRequest,
   SearchResponse,
@@ -25,6 +27,8 @@ export interface SearchServiceOptions {
   cacheTtlMs?: number;
 }
 
+const config = loadConfig();
+const openai = new OpenAI({ apiKey: config.openaiApiKey });
 export class SearchService {
   private readonly cache: LRUCache<string, SearchResponse>;
 
@@ -68,12 +72,30 @@ export class SearchService {
     }
 
     // ── Execute search ──
+        // Generate embedding for semantic search
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: query,
+    });
+    const queryVector = embeddingResponse.data[0].embedding;
+
+    // Execute Hybrid Search
     const searchResults = await this.client.search(query, {
       top,
       filter,
       searchFields: ["content", "title"],
       select: ["id", "title", "content", "folder", "GroupIds"],
-      queryType: "simple",
+      
+      vectorSearchOptions: {
+        queries: [
+          {
+            kind: "vector",
+            vector: queryVector,
+            kNearestNeighborsCount: top,
+            fields: ["contentVector"],
+          },
+        ],
+      },
     });
 
     // ── Map results ──
@@ -135,3 +157,5 @@ export class SearchService {
     return content.substring(0, maxLength) + "...";
   }
 }
+
+

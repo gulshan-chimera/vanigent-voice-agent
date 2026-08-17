@@ -25,6 +25,9 @@ function optionalEnv(name: string, defaultValue: string): string {
 // ---------------------------------------------------------------------------
 
 export interface KnowledgeBaseConfig {
+  // OpenAI Embeddings
+  openaiApiKey: string;
+
   // Azure AI Search
   searchServiceName: string;
   searchApiKey: string;
@@ -50,11 +53,15 @@ export interface KnowledgeBaseConfig {
 }
 
 export function loadConfig(): KnowledgeBaseConfig {
+  const openaiApiKey = optionalEnv("OPENAI_API_KEY", "sk-placeholder-key");
+
   const searchServiceName = requireEnv("SEARCH_SERVICE_NAME");
 
   return {
     // Azure AI Search
     searchServiceName,
+    openaiApiKey,
+
     searchApiKey: requireEnv("SEARCH_API_KEY"),
     searchIndexName: optionalEnv("SEARCH_INDEX_NAME", "sharepoint-index"),
     searchEndpoint: `https://${searchServiceName}.search.windows.net`,
@@ -93,3 +100,4 @@ export function requireGraphCredentials(config: KnowledgeBaseConfig): void {
     throw new Error("[CONFIG] CLIENT_SECRET is required for this operation");
   }
 }
+
