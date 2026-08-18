@@ -12,7 +12,8 @@
   "dependencies": {
     "@azure/functions": "^4.5.0",
     "@azure/search-documents": "^13.0.0",
-    "pdf-parse": "^2.4.5"
+    "pdf-parse": "^2.4.5",
+    "pdf-to-img": "^6.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

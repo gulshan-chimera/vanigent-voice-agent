@@ -17,7 +17,9 @@ export interface HrKbDocument {
   content: string;
   webUrl: string;
   driveItemId: string;
+  chunkIndex: number;
   lastModifiedDateTime: string;
+  contentVector: number[];
 }
 
 function getConfig() {
@@ -66,7 +68,7 @@ export async function ensureIndexExists(): Promise<boolean> {
   const result = getIndexClient();
   if (!result) return false;
 
-  const indexDefinition: SearchIndex = {
+    const indexDefinition: SearchIndex = {
     name: result.indexName,
     fields: [
       { name: "id", type: "Edm.String", key: true, filterable: true },
@@ -75,7 +77,24 @@ export async function ensureIndexExists(): Promise<boolean> {
       { name: "webUrl", type: "Edm.String", filterable: false, searchable: false },
       { name: "driveItemId", type: "Edm.String", filterable: true, searchable: false },
       { name: "lastModifiedDateTime", type: "Edm.String", filterable: true, sortable: true },
+      {
+        name: "contentVector",
+        type: "Collection(Edm.Single)",
+        searchable: true,
+        vectorSearchDimensions: 1536,
+        vectorSearchProfileName: "hr-kb-vector-profile",
+      },
+      { name: "chunkIndex", type: "Edm.Int32", filterable: true },
     ],
+    vectorSearch: {
+      algorithms: [{ name: "hr-kb-hnsw", kind: "hnsw" }],
+      profiles: [
+        {
+          name: "hr-kb-vector-profile",
+          algorithmConfigurationName: "hr-kb-hnsw",
+        },
+      ],
+    },
   };
 
   try {
