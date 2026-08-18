@@ -1,14 +1,14 @@
-// src/functions/testImageExtraction.ts
+// src/functions/testPageText.ts
 //
-// TEMPORARY diagnostic endpoint. Extracts images from a given HR KB file
-// and returns the raw result, so we can see the real library output
-// before building the full captioning pipeline on top of it.
+// TEMPORARY diagnostic endpoint — confirms per-page text extraction
+// works and aligns with the page count we already confirmed via image
+// rendering, before building the full combine+caption+index pipeline.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { downloadHrKbFile } from "../lib/sharepointFiles";
 import { renderPdfPagesAsImages } from "../lib/pdfPageText";
 
-export async function testImageExtraction(
+export async function testPageText(
   request: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
@@ -29,21 +29,25 @@ export async function testImageExtraction(
     return { status: 404, jsonBody: { error: "File not found" } };
   }
 
-
-  const images = await renderPdfPagesAsImages(fileContent.base64Content);
+  const pageTexts = await renderPdfPagesAsImages(fileContent.base64Content);
 
   return {
     status: 200,
     jsonBody: {
       fileName: fileContent.fileName,
-      imagesFound: images.length,
+      pageCount: pageTexts.length,
+      pages: pageTexts.map((text, i) => ({
+        page: i + 1,
+        charCount: text.length,
+        preview: text.slice(0, 150),
+      })),
     },
   };
 }
 
-app.http("testImageExtraction", {
+app.http("testPageText", {
   methods: ["POST"],
   authLevel: "anonymous",
-  route: "testImageExtraction",
-  handler: testImageExtraction,
+  route: "testPageText",
+  handler: testPageText,
 });
