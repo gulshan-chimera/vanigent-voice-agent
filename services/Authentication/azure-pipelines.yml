@@ -2,6 +2,7 @@ trigger:
   branches:
     include:
       - develop
+      - release
   paths:
     include:
       - services/Authentication/*
@@ -10,6 +11,7 @@ pr:
   branches:
     include:
       - develop
+      - release
   paths:
     include:
       - services/Authentication/*
@@ -20,7 +22,15 @@ pool:
 variables:
   nodeVersion: '24.x'
   azureSubscription: 'Ask-Vanigent-Dev'
-  functionAppName: 'vanigent-ai-auth'
+  ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/develop') }}:
+    functionAppName: 'vanigent-ai-auth'
+    adoEnvironment: 'vanigent-dev'
+  ${{ elseif eq(variables['Build.SourceBranch'], 'refs/heads/release') }}:
+    functionAppName: 'vanigent-ai-auth-uat'
+    adoEnvironment: 'vanigent-uat'
+  ${{ else }}:
+    functionAppName: 'vanigent-ai-auth'
+    adoEnvironment: 'vanigent-dev'
 
 stages:
   - stage: Build_And_Test
@@ -64,10 +74,10 @@ stages:
   - stage: Deploy
     displayName: 'Deploy to Azure Function App'
     dependsOn: Build_And_Test
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/develop', 'refs/heads/release'))
     jobs:
       - deployment: Deploy_Authentication
-        environment: 'vanigent-dev'
+        environment: '$(adoEnvironment)'
         strategy:
           runOnce:
             deploy:
@@ -82,4 +92,3 @@ stages:
                     appName: '$(functionAppName)'
                     package: '$(Pipeline.Workspace)/authentication-artifact/authentication-$(Build.BuildId).zip'
                     runtimeStack: 'NODE|24'
-
