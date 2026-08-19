@@ -6,7 +6,7 @@
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { downloadHrKbFile } from "../lib/sharepointFiles";
-import { renderPdfPagesAsImages } from "../lib/pdfPageText";
+import { extractPageTexts } from "../lib/pdfPageText";
 
 export async function testPageText(
   request: HttpRequest,
@@ -29,7 +29,7 @@ export async function testPageText(
     return { status: 404, jsonBody: { error: "File not found" } };
   }
 
-  const pageTexts = await renderPdfPagesAsImages(fileContent.base64Content);
+  const pageTexts = await extractPageTexts(fileContent.base64Content);
 
   return {
     status: 200,

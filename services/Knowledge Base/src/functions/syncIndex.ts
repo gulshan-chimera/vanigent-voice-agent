@@ -1,16 +1,17 @@
 // src/functions/syncIndex.ts
 //
-// PROTOTYPE sync — manually triggered for now. Clears the index and
-// re-indexes all current PDFs from the HR KB SharePoint library.
-// PDF-only, plain keyword search — the pre-Azure-OpenAI version.
+// Full sync: clears the index and re-indexes all current PDFs from the
+// HR KB SharePoint library. Each PAGE becomes one chunk — combining that
+// page's extracted text with a context-aware caption of its visual
+// elements, keeping steps and their screenshots together.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { listHrKbFiles, downloadHrKbFile } from "../lib/sharepointFiles";
 import { ensureIndexExists, clearIndex, uploadDocument, HrKbDocument } from "../lib/searchIndex";
-import { extractPdfText } from "../lib/pdfText";
+import { extractPageTexts } from "../lib/pdfPageText";
+import {renderPdfPagesAsImages} from "../lib/pdfImages"
+import { generateEmbedding, generateImageCaption } from "../lib/azureOpenAI";
 import { DriveItem } from "../types/knowledgeBase";
-import { generateEmbedding } from "../lib/azureOpenAI";
-import { chunkText } from "../lib/textChunker";
 
 export async function syncIndex(
   request: HttpRequest,
@@ -32,8 +33,9 @@ export async function syncIndex(
     (item: DriveItem) => item.file && item.name.toLowerCase().endsWith(".pdf")
   );
 
-  let indexed = 0;
-  let skipped = 0;
+  let indexedPages = 0;
+  let skippedPages = 0;
+  let skippedFiles = 0;
 
   for (const item of pdfItems) {
     context.log(`[SYNC] Processing: ${item.name}`);
@@ -41,37 +43,56 @@ export async function syncIndex(
     const fileContent = await downloadHrKbFile(item.id);
     if (!fileContent) {
       context.warn(`[SYNC] Failed to download: ${item.name}`);
-      skipped++;
+      skippedFiles++;
       continue;
     }
 
-    const text = await extractPdfText(fileContent.base64Content);
-    if (!text) {
-      context.warn(`[SYNC] No text extracted (image-based?): ${item.name}`);
-      skipped++;
+    const pageTexts = await extractPageTexts(fileContent.base64Content);
+    const pageImages = await renderPdfPagesAsImages(fileContent.base64Content);
+
+    if (pageTexts.length === 0 || pageImages.length === 0) {
+      context.warn(`[SYNC] No pages extracted from: ${item.name}`);
+      skippedFiles++;
       continue;
     }
 
-    const chunks = chunkText(text);
-    context.log(`[SYNC] Split "${item.name}" into ${chunks.length} chunk(s)`);
+    if (pageTexts.length !== pageImages.length) {
+      context.warn(
+        `[SYNC] Page count mismatch for "${item.name}": ${pageTexts.length} text pages vs ${pageImages.length} image pages. Using the smaller count.`
+      );
+    }
 
-    let fileIndexedChunks = 0;
-    let fileSkippedChunks = 0;
+    const pageCount = Math.min(pageTexts.length, pageImages.length);
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
+    for (let i = 0; i < pageCount; i++) {
+      const pageText = pageTexts[i];
+      const pageImageBase64 = pageImages[i].toString("base64");
 
-      const embedding = await generateEmbedding(chunk);
+      const caption = await generateImageCaption(pageImageBase64, pageText);
+      const captionText =
+        caption && caption !== "No significant visual content."
+          ? `\n\n[Visual content on this page: ${caption}]`
+          : "";
+
+      const combinedContent = `${pageText}${captionText}`.trim();
+
+      if (combinedContent.length === 0) {
+        context.warn(`[SYNC] Page ${i + 1} of "${item.name}" has no content — skipping.`);
+        skippedPages++;
+        continue;
+      }
+
+      const embedding = await generateEmbedding(combinedContent);
       if (!embedding) {
-        context.warn(`[SYNC] Failed to generate embedding for chunk ${i} of: ${item.name}`);
-        fileSkippedChunks++;
+        context.warn(`[SYNC] Failed to embed page ${i + 1} of: ${item.name}`);
+        skippedPages++;
         continue;
       }
 
       const doc: HrKbDocument = {
-        id: Buffer.from(`${item.id}__chunk${i}`).toString("base64").replace(/[+/=]/g, "_"),
+        id: Buffer.from(`${item.id}__page${i}`).toString("base64").replace(/[+/=]/g, "_"),
         fileName: item.name,
-        content: chunk,
+        content: combinedContent,
         webUrl: item.webUrl ?? "",
         driveItemId: item.id,
         chunkIndex: i,
@@ -81,24 +102,18 @@ export async function syncIndex(
 
       const uploaded = await uploadDocument(doc);
       if (uploaded) {
-        fileIndexedChunks++;
+        indexedPages++;
       } else {
-        fileSkippedChunks++;
+        skippedPages++;
       }
     }
 
-    if (fileIndexedChunks > 0) {
-      indexed++;
-      context.log(`[SYNC] Indexed "${item.name}": ${fileIndexedChunks} chunk(s), ${fileSkippedChunks} failed`);
-    } else {
-      skipped++;
-      context.warn(`[SYNC] All chunks failed for: ${item.name}`);
-    }
+    context.log(`[SYNC] Finished "${item.name}": ${pageCount} page(s) processed`);
   }
 
   return {
     status: 200,
-    jsonBody: { indexed, skipped, totalPdfFiles: pdfItems.length },
+    jsonBody: { indexedPages, skippedPages, skippedFiles, totalPdfFiles: pdfItems.length },
   };
 }
 

@@ -6,7 +6,7 @@
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { downloadHrKbFile } from "../lib/sharepointFiles";
-import { renderPdfPagesAsImages } from "../lib/pdfPageText";
+import { extractPageTexts } from "../lib/pdfPageText";
 
 export async function testImageExtraction(
   request: HttpRequest,
@@ -30,7 +30,7 @@ export async function testImageExtraction(
   }
 
 
-  const images = await renderPdfPagesAsImages(fileContent.base64Content);
+  const images = await extractPageTexts(fileContent.base64Content);
 
   return {
     status: 200,
