@@ -1,3 +1,9 @@
 
 local.settings.json
 host.json
+
+node_modules/
+dist/
+local.settings.json
+.env
+*.log
