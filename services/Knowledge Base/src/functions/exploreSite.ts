@@ -1,23 +1,33 @@
 // src/functions/exploreSite.ts
 //
-// TEMPORARY diagnostic endpoint — returns the site ID and list of document
-// libraries for VanigentPortal, so we can see where "Knowledge Base"
-// actually lives before building the real endpoints.
+// Diagnostic — lists every document library on the site with its ID and
+// name. Useful for populating KB_LIBRARY_ALLOWLIST and for grabbing a
+// driveId when testing the per-file diagnostics below.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { exploreSite } from "../lib/sharepointExplore";
-
+import { listSiteDrives } from "../lib/sharepointFiles";
+import {isRequestAuthorized} from "../lib/verifyWebhookAuth"
 export async function exploreSiteHandler(
   request: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
-  const result = await exploreSite();
+  if (!isRequestAuthorized(request)) {
+    context.warn("[EXPLORE-SITE] Rejected request — invalid or missing bearer token.");
+    return { status: 401, jsonBody: { error: "Unauthorized" } };
+  }
+  const drives = await listSiteDrives();
 
-  if (!result) {
-    return { status: 502, jsonBody: { error: "Failed to explore SharePoint site" } };
+  if (!drives) {
+    return { status: 502, jsonBody: { error: "Failed to list SharePoint libraries" } };
   }
 
-  return { status: 200, jsonBody: result };
+  return {
+    status: 200,
+    jsonBody: {
+      count: drives.length,
+      drives: drives.map((d) => ({ id: d.id, name: d.name, webUrl: d.webUrl })),
+    },
+  };
 }
 
 app.http("exploreSite", {
