@@ -57,6 +57,22 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
  * connects to the surrounding instructions rather than describing the
  * image in isolation.
  */
+/**
+ * Generates a caption describing meaningful visual content on a page,
+ * using that page's own extracted text as context.
+ *
+ * The prompt is deliberately strict: earlier testing showed the model
+ * would always find *something* to describe (logos, section header bars,
+ * footers), producing captions that added no retrievable information and
+ * diluted the page's embedding with noise. It now names those elements
+ * explicitly as ignorable, and requires the caption to contain
+ * information not already present in the page text.
+ *
+ * Returns null on failure, or the exact string SKIP_CAPTION when there
+ * is nothing worth describing.
+ */
+export const SKIP_CAPTION = "NOTHING_TO_DESCRIBE";
+
 export async function generateImageCaption(
   imageBase64: string,
   pageText: string
@@ -66,7 +82,33 @@ export async function generateImageCaption(
 
   const url = `${config.endpoint}/openai/deployments/${config.chatDeployment}/chat/completions?api-version=2024-06-01`;
 
-  const prompt = `This image is a page from a company HR document. Here is the text already extracted from this same page:\n\n"""${pageText}"""\n\nDescribe ONLY the visual elements on this page — screenshots, diagrams, charts, arrows, highlighted UI elements, or photos. Do NOT transcribe or repeat the body text above; it's already captured separately. If a screenshot shows a specific step or action (e.g. an arrow pointing to a button, a highlighted tab), describe exactly what it shows and connect it to the relevant step from the text. If there are no meaningful visual elements beyond plain text formatting, respond with exactly: "No significant visual content."`;
+  const prompt = `This image is a page from a company HR document. Here is the text already extracted from this same page:
+
+"""${pageText}"""
+
+Your job is to describe visual content that carries INFORMATION A READER WOULD OTHERWISE MISS — and nothing else.
+
+DESCRIBE these:
+- Screenshots of software interfaces, especially where an arrow, box, or highlight points at a specific button, tab, menu, or field
+- Charts, graphs, or diagrams carrying data or relationships
+- Flowcharts, org charts, or process illustrations
+- Photographs of equipment, facilities, or procedures being demonstrated
+- Any figure whose meaning is NOT already stated in the page text above
+
+IGNORE these completely — they are page furniture, not content:
+- Company logos or branding of any kind
+- Section headers, coloured header bars, or title banners
+- Footers, page numbers, dates, document IDs
+- Text formatting: bold, italics, numbered lists, bullets, indentation
+- Table borders, rules, dividers, background shading, decorative graphics
+- Generic stock photography of people, offices, or meetings that illustrates nothing specific
+
+DECISION RULE: if everything visual on this page falls into the IGNORE list, or if the visual content only repeats what the page text already says, respond with exactly this and nothing else:
+${SKIP_CAPTION}
+
+Most pages in a text document will be ${SKIP_CAPTION}. That is the expected and correct answer — do not look for something to say.
+
+If there IS genuine visual content, describe only that. Do not mention the ignored elements. Do not transcribe body text. If a screenshot shows a specific step, state exactly what it shows and which step it belongs to.`;
 
   try {
     const response = await fetch(url, {
@@ -89,6 +131,7 @@ export async function generateImageCaption(
           },
         ],
         max_tokens: 500,
+        temperature: 0,
       }),
     });
 
@@ -105,7 +148,6 @@ export async function generateImageCaption(
     return null;
   }
 }
-
 /**
  * Generates a natural, spoken-style answer to the caller's question,
  * grounded strictly in the provided context chunks. Returns null on

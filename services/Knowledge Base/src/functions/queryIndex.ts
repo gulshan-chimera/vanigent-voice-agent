@@ -7,11 +7,18 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { getSearchClient } from "../lib/searchIndex";
 import { generateEmbedding } from "../lib/azureOpenAI";
+import { isRequestAuthorized } from "../lib/verifyWebhookAuth";
 
 export async function queryIndex(
   request: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
+
+  if (!isRequestAuthorized(request)) {
+    context.warn("[QUERY-INDEX] Rejected request — invalid or missing bearer token.");
+    return { status: 401, jsonBody: { error: "Unauthorized" } };
+  }
+
   let body: { query?: string };
 
   try {

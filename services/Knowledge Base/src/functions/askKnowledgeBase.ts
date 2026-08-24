@@ -1,14 +1,21 @@
 // src/functions/askKnowledgeBase.ts
 //
 // Simple internal testing endpoint — plain JSON in, plain JSON out.
+// Protected by a shared Bearer secret.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { answerQuestion } from "../lib/knowledgeBaseAnswer";
+import { isRequestAuthorized } from "../lib/verifyWebhookAuth";
 
 export async function askKnowledgeBase(
   request: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
+  if (!isRequestAuthorized(request)) {
+    context.warn("[ASK-KB] Rejected request — invalid or missing bearer token.");
+    return { status: 401, jsonBody: { error: "Unauthorized" } };
+  }
+
   let body: { question?: string };
 
   try {

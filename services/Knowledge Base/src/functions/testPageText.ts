@@ -5,14 +5,19 @@
 // rendering, before building the full combine+caption+index pipeline.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { downloadHrKbFile } from "../lib/sharepointFiles";
+import { downloadDriveFile } from "../lib/sharepointFiles";
 import { extractPageTexts } from "../lib/pdfPageText";
-
+import {isRequestAuthorized} from "../lib/verifyWebhookAuth"
 export async function testPageText(
   request: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
-  let body: { itemId?: string };
+    if (!isRequestAuthorized(request)) {
+    context.warn("[TEST-PAGE-TEXT] Rejected request — invalid or missing bearer token.");
+    return { status: 401, jsonBody: { error: "Unauthorized" } };
+  }
+  let body: { itemId?: string , driveId?: string};
+
 
   try {
     body = (await request.json()) as { itemId?: string };
@@ -20,11 +25,10 @@ export async function testPageText(
     return { status: 400, jsonBody: { error: "Invalid request body" } };
   }
 
-  if (!body.itemId) {
-    return { status: 400, jsonBody: { error: "itemId is required" } };
+  if (!body.itemId || !body.driveId) {
+    return { status: 400, jsonBody: { error: "itemId and driveId are required" } };
   }
-
-  const fileContent = await downloadHrKbFile(body.itemId);
+   const fileContent = await downloadDriveFile(body.driveId, body.itemId);
   if (!fileContent) {
     return { status: 404, jsonBody: { error: "File not found" } };
   }
