@@ -1,0 +1,94 @@
+trigger:
+  branches:
+    include:
+      - develop
+      - release
+  paths:
+    include:
+      - 'services/Knowledge Base/*'
+
+pr:
+  branches:
+    include:
+      - develop
+      - release
+  paths:
+    include:
+      - 'services/Knowledge Base/*'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  nodeVersion: '24.x'
+  azureSubscription: 'Ask-Vanigent-Dev'
+  ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/develop') }}:
+    functionAppName: 'vanigent-ai-kb-dev'
+    adoEnvironment: 'vanigent-dev'
+  ${{ elseif eq(variables['Build.SourceBranch'], 'refs/heads/release') }}:
+    functionAppName: 'vanigent-ai-kb-uat'
+    adoEnvironment: 'vanigent-uat'
+  ${{ else }}:
+    functionAppName: 'vanigent-ai-kb-dev'
+    adoEnvironment: 'vanigent-dev'
+
+stages:
+  - stage: Build_And_Test
+    displayName: 'Build Knowledge Base Service'
+    jobs:
+      - job: Build
+        displayName: 'Build Knowledge Base'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '$(nodeVersion)'
+            displayName: 'Install Node.js'
+
+          - script: |
+              npm ci
+              npm run build
+            workingDirectory: 'services/Knowledge Base'
+            displayName: 'Install and Build'
+
+          - script: |
+              npm prune --production
+            workingDirectory: 'services/Knowledge Base'
+            displayName: 'Prune dev dependencies'
+
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: 'services/Knowledge Base'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/knowledge-base-$(Build.BuildId).zip'
+              replaceExistingArchive: true
+            displayName: 'Zip Artifact'
+
+          - publish: $(Build.ArtifactStagingDirectory)/knowledge-base-$(Build.BuildId).zip
+            artifact: knowledge-base-artifact
+            displayName: 'Publish Artifact'
+
+  # -------------------------------------------------------------------------
+  # DEPLOYMENT STAGE (Enabled)
+  # -------------------------------------------------------------------------
+  - stage: Deploy
+    displayName: 'Deploy to Azure Function App'
+    dependsOn: Build_And_Test
+    condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/develop', 'refs/heads/release'))
+    jobs:
+      - deployment: Deploy_KnowledgeBase
+        environment: '$(adoEnvironment)'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: knowledge-base-artifact
+
+                - task: AzureFunctionApp@2
+                  inputs:
+                    connectedServiceNameARM: '$(azureSubscription)'
+                    appType: 'functionAppLinux'
+                    appName: '$(functionAppName)'
+                    package: '$(Pipeline.Workspace)/knowledge-base-artifact/knowledge-base-$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|24'

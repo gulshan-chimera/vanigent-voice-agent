@@ -13,20 +13,29 @@ import {renderPdfPagesAsImages} from "../lib/pdfImages"
 import { generateEmbedding, generateImageCaption } from "../lib/azureOpenAI";
 import { DriveItem } from "../types/knowledgeBase";
 
-export async function syncIndex(
-  request: HttpRequest,
-  context: InvocationContext
-): Promise<HttpResponseInit> {
+export interface SyncResult {
+  indexedPages: number;
+  skippedPages: number;
+  skippedFiles: number;
+  totalPdfFiles: number;
+}
+
+/**
+ * Runs the full HR KB resync (clear + re-index every PDF page). Shared by
+ * the manual HTTP trigger and the nightly timer trigger. Throws on setup
+ * failures (index/list) so each caller can report them its own way.
+ */
+export async function runSync(context: InvocationContext): Promise<SyncResult> {
   const indexReady = await ensureIndexExists();
   if (!indexReady) {
-    return { status: 502, jsonBody: { error: "Failed to prepare search index" } };
+    throw new Error("Failed to prepare search index");
   }
 
   await clearIndex();
 
   const listResult = await listHrKbFiles();
   if (!listResult) {
-    return { status: 502, jsonBody: { error: "Failed to list files from SharePoint" } };
+    throw new Error("Failed to list files from SharePoint");
   }
 
   const pdfItems = listResult.value.filter(
@@ -111,10 +120,19 @@ export async function syncIndex(
     context.log(`[SYNC] Finished "${item.name}": ${pageCount} page(s) processed`);
   }
 
-  return {
-    status: 200,
-    jsonBody: { indexedPages, skippedPages, skippedFiles, totalPdfFiles: pdfItems.length },
-  };
+  return { indexedPages, skippedPages, skippedFiles, totalPdfFiles: pdfItems.length };
+}
+
+export async function syncIndex(
+  request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
+  try {
+    const result = await runSync(context);
+    return { status: 200, jsonBody: result };
+  } catch (error) {
+    return { status: 502, jsonBody: { error: (error as Error).message } };
+  }
 }
 
 app.http("syncIndex", {
