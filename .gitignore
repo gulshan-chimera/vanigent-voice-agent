@@ -17,6 +17,9 @@ pnpm-debug.log*
 .env.*
 !.env.example
 
+# Azure Functions local settings (contains secrets, never commit)
+local.settings.json
+
 # OS / editor files
 .DS_Store
 Thumbs.db
