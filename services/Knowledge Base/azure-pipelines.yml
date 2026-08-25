@@ -2,7 +2,7 @@ trigger:
   branches:
     include:
       - develop
-      - release
+      - release1
   paths:
     include:
       - 'services/Knowledge Base/*'
@@ -11,7 +11,7 @@ pr:
   branches:
     include:
       - develop
-      - release
+      - release1
   paths:
     include:
       - 'services/Knowledge Base/*'
@@ -25,7 +25,7 @@ variables:
   ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/develop') }}:
     functionAppName: 'vanigent-ai-kb-dev'
     adoEnvironment: 'vanigent-dev'
-  ${{ elseif eq(variables['Build.SourceBranch'], 'refs/heads/release') }}:
+  ${{ elseif eq(variables['Build.SourceBranch'], 'refs/heads/release1') }}:
     functionAppName: 'vanigent-ai-kb-uat'
     adoEnvironment: 'vanigent-uat'
   ${{ else }}:
@@ -74,7 +74,7 @@ stages:
   - stage: Deploy
     displayName: 'Deploy to Azure Function App'
     dependsOn: Build_And_Test
-    condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/develop', 'refs/heads/release'))
+    condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/develop', 'refs/heads/release1'))
     jobs:
       - deployment: Deploy_KnowledgeBase
         environment: '$(adoEnvironment)'
