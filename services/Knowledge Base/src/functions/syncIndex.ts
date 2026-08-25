@@ -197,39 +197,45 @@ async function indexFile(
   };
 }
 
-export async function syncIndex(
-  request: HttpRequest,
-  context: InvocationContext
-): Promise<HttpResponseInit> {
-  if (!isRequestAuthorized(request)) {
-    context.warn("[SYNC] Rejected request — invalid or missing bearer token.");
-    return { status: 401, jsonBody: { error: "Unauthorized" } };
-  }
-  const force = request.query.get("force") === "true";
+/** Thrown for setup failures so both triggers can report them their own way. */
+export class SyncSetupError extends Error {
+  status: number;
+  details?: Record<string, unknown>;
 
+  constructor(message: string, status: number, details?: Record<string, unknown>) {
+    super(message);
+    this.status = status;
+    this.details = details;
+  }
+}
+
+/**
+ * Runs one incremental sync pass. Shared by the manual HTTP trigger and
+ * the nightly timer trigger — neither the auth check nor the `force`
+ * query flag belong here, since the timer has no HttpRequest to read
+ * them from; the timer always runs a normal (non-force) pass.
+ */
+export async function runSync(context: InvocationContext, force: boolean): Promise<SyncSummary> {
   const indexReady = await ensureIndexExists();
   if (!indexReady) {
-    return { status: 502, jsonBody: { error: "Failed to prepare search index" } };
+    throw new SyncSetupError("Failed to prepare search index", 502);
   }
 
   const allDrives = await listSiteDrives();
   if (!allDrives) {
-    return { status: 502, jsonBody: { error: "Failed to list SharePoint libraries" } };
+    throw new SyncSetupError("Failed to list SharePoint libraries", 502);
   }
 
   const selection = selectDrives(allDrives);
   const drives = selection.included;
 
   if (drives.length === 0) {
-    return {
-      status: 400,
-      jsonBody: {
-        error: "No libraries selected — check KB_LIBRARY_ALLOWLIST / KB_LIBRARY_PATTERN.",
-        availableLibraries: allDrives.map((d) => d.name),
-      },
-    };
+    throw new SyncSetupError(
+      "No libraries selected — check KB_LIBRARY_ALLOWLIST / KB_LIBRARY_PATTERN.",
+      400,
+      { availableLibraries: allDrives.map((d) => d.name) }
+    );
   }
-
 
   if (force) {
     context.warn("[SYNC] FORCE mode — wiping the entire index before rebuilding.");
@@ -242,7 +248,7 @@ export async function syncIndex(
     : await getIndexedFileState();
 
   if (indexedState === null) {
-    return { status: 502, jsonBody: { error: "Failed to read current index state" } };
+    throw new SyncSetupError("Failed to read current index state", 502);
   }
 
   const summary: SyncSummary = {
@@ -332,7 +338,32 @@ export async function syncIndex(
   }
 
   context.log(`[SYNC] Done. ${JSON.stringify(summary)}`);
-  return { status: 200, jsonBody: summary };
+  return summary;
+}
+
+export async function syncIndex(
+  request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
+  if (!isRequestAuthorized(request)) {
+    context.warn("[SYNC] Rejected request — invalid or missing bearer token.");
+    return { status: 401, jsonBody: { error: "Unauthorized" } };
+  }
+  const force = request.query.get("force") === "true";
+
+  try {
+    const summary = await runSync(context, force);
+    return { status: 200, jsonBody: summary };
+  } catch (error) {
+    if (error instanceof SyncSetupError) {
+      return {
+        status: error.status,
+        jsonBody: { error: error.message, ...(error.details ?? {}) },
+      };
+    }
+    context.error(`[SYNC] Unexpected failure: ${(error as Error).message}`);
+    return { status: 502, jsonBody: { error: "Sync failed unexpectedly" } };
+  }
 }
 
 app.http("syncIndex", {
