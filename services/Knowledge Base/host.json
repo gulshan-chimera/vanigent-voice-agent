@@ -2,7 +2,18 @@
   "version": "2.0",
   "logging": {
     "applicationInsights": {
-      "samplingSettings": { "isEnabled": true, "excludedTypes": "Request" }
+      "samplingSettings": {
+        "isEnabled": true,
+        "excludedTypes": "Request"
+      }
+    }
+  },
+  "extensions": {
+    "queues": {
+      "batchSize": 3,
+      "newBatchThreshold": 0,
+      "maxDequeueCount": 5,
+      "visibilityTimeout": "00:10:00"
     }
   },
   "extensionBundle": {
