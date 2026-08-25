@@ -292,3 +292,46 @@ export async function downloadDriveFile(
     return null;
   }
 }
+
+/**
+ * Downloads a file already converted to PDF by Graph itself
+ * (`?format=pdf` on the content endpoint). Graph supports this for
+ * several source formats including pptx/ppt/docx/doc — we use it for
+ * PPTX so each slide becomes one PDF page, letting the PPTX path reuse
+ * the exact same per-page text extraction + image rendering + vision
+ * captioning pipeline as native PDFs, with no separate rendering engine
+ * of our own.
+ */
+export async function downloadDriveFileAsPdf(
+  driveId: string,
+  itemId: string
+): Promise<string | null> {
+  const token = await getGraphAccessToken();
+  if (!token) {
+    console.error("[SHAREPOINT-FILES] Could not acquire Graph token.");
+    return null;
+  }
+
+  try {
+    const contentUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content?format=pdf`;
+    const response = await fetch(contentUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(
+        `[SHAREPOINT-FILES] PDF conversion failed (${response.status}) for item ${itemId}: ${errorText}`
+      );
+      return null;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString("base64");
+  } catch (error) {
+    console.error(
+      `[SHAREPOINT-FILES] Network error during PDF-conversion download: ${(error as Error).message}`
+    );
+    return null;
+  }
+}

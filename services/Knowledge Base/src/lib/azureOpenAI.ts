@@ -110,43 +110,79 @@ Most pages in a text document will be ${SKIP_CAPTION}. That is the expected and 
 
 If there IS genuine visual content, describe only that. Do not mention the ignored elements. Do not transcribe body text. If a screenshot shows a specific step, state exactly what it shows and which step it belongs to.`;
 
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": config.apiKey,
-      },
-      body: JSON.stringify({
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              {
-                type: "image_url",
-                image_url: { url: `data:image/png;base64,${imageBase64}` },
-              },
-            ],
-          },
-        ],
-        max_tokens: 500,
-        temperature: 0,
-      }),
-    });
+  const requestOptions = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": config.apiKey,
+    },
+    body: JSON.stringify({
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: { url: `data:image/png;base64,${imageBase64}` },
+            },
+          ],
+        },
+      ],
+      max_tokens: 500,
+      temperature: 0,
+    }),
+  };
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[AZURE-OPENAI] Caption request failed (${response.status}): ${errorText}`);
+  // Retry on 429 with exponential backoff. Without this, a rate limit
+  // returns null, which the caller cannot distinguish from "this page
+  // has nothing worth describing" — so real screenshots silently vanish
+  // from the index while the sync still reports success.
+  const MAX_ATTEMPTS = 4;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, requestOptions);
+
+      if (response.status === 429) {
+        if (attempt === MAX_ATTEMPTS) {
+          console.error(
+            `[AZURE-OPENAI] Still rate limited after ${MAX_ATTEMPTS} attempts — giving up on this page.`
+          );
+          return null;
+        }
+
+        // Azure tells us how long to wait; fall back to exponential
+        // backoff (5s, 10s, 20s) when the header is absent.
+        const retryAfterHeader = response.headers.get("retry-after");
+        const baseSeconds = retryAfterHeader
+          ? Number(retryAfterHeader)
+          : 5 * Math.pow(2, attempt - 1);
+
+        const waitSeconds = baseSeconds + Math.random() * 5;
+        
+        console.warn(
+          `[AZURE-OPENAI] Rate limited (attempt ${attempt}/${MAX_ATTEMPTS}) — waiting ${waitSeconds}s.`
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1000));
+        continue;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[AZURE-OPENAI] Caption request failed (${response.status}): ${errorText}`);
+        return null;
+      }
+
+      const data = (await response.json()) as { choices: { message: { content: string } }[] };
+      return data.choices[0].message.content.trim();
+    } catch (error) {
+      console.error(`[AZURE-OPENAI] Caption network error: ${(error as Error).message}`);
       return null;
     }
-
-    const data = (await response.json()) as { choices: { message: { content: string } }[] };
-    return data.choices[0].message.content.trim();
-  } catch (error) {
-    console.error(`[AZURE-OPENAI] Caption network error: ${(error as Error).message}`);
-    return null;
   }
+
+  return null;
 }
 /**
  * Generates a natural, spoken-style answer to the caller's question,
