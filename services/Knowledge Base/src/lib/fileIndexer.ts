@@ -1,29 +1,36 @@
 // src/lib/fileIndexer.ts
 //
-// Indexes ONE file. Every supported format ends up going through the
-// SAME page-based, vision-captioned pipeline (indexPdfFile) — PDF
-// natively, and DOCX/PPTX by first asking Microsoft Graph to convert
-// them to PDF server-side (downloadDriveFileAsPdf, `?format=pdf`).
+// Indexes ONE file. Dispatches on file type:
 //
-// That conversion step is the only way any of these formats gets vision
-// captioning at all: neither Word nor PowerPoint documents have a pure-JS
-// rendering path of their own (no pdfjs-dist equivalent), so without
-// converting first there'd be nothing to hand the vision model. Once
-// converted, a Word page or a PowerPoint slide becomes one PDF page —
-// same chunk-per-page model, same captioning, no format-specific
-// indexing logic needed beyond the conversion call.
+//   PDF  — has fixed pages, so one page = one chunk, and each page can
+//          be rendered to an image and captioned by the vision model.
+//          This keeps a step's text together with its own screenshot.
 //
-// Note for DOCX specifically: page boundaries in the converted PDF come
-// from Word's print layout (page size/margins/fonts), not from anything
-// the author intended as a content boundary — unlike PPTX slides, which
-// are already an author-defined unit. In practice this is still a
-// reasonable, consistent chunk size; it just isn't a "meaningful"
-// boundary the way a slide or a PDF page in a fixed-layout document is.
+//   DOCX — extracted directly from the .docx XML via mammoth
+//          (docxText.ts), chunked by paragraph (textChunker.ts), no
+//          vision captioning. This is a direct reversion from routing
+//          DOCX through Graph's PDF conversion + the PDF pipeline:
+//          mammoth reads structured paragraph/table XML straight from
+//          the document, so a table row's cells stay in document order;
+//          pdfjs's text extraction from the Word→PDF-converted render
+//          instead reconstructs order from on-page text positions, which
+//          scrambled multi-column table rows badly enough that answers
+//          about specific table entries were unreliable. Losing vision
+//          captioning for DOCX is the trade-off for getting table
+//          content back to something the model can actually read.
+//
+//   PPTX — still converted to PDF via Graph (downloadDriveFileAsPdf,
+//          `?format=pdf`) and run through the PDF path unchanged, since
+//          that's the only way to get slide boundaries + vision
+//          captioning and this format hasn't shown the same table
+//          problem DOCX did.
 
 import { downloadDriveFile, downloadDriveFileAsPdf } from "./sharepointFiles";
 import { deleteFileChunks, uploadDocument, KbDocument } from "./searchIndex";
 import { extractPageTexts } from "./pdfPageText";
 import { renderPdfPagesAsImages } from "./pdfImages";
+import { extractDocxText } from "./docxText";
+import { chunkText } from "./textChunker";
 import { generateEmbedding, generateImageCaption, SKIP_CAPTION } from "./azureOpenAI";
 import { IndexFileMessage } from "./indexQueue";
 
@@ -204,12 +211,79 @@ async function indexPdfFile(
 }
 
 // ---------------------------------------------------------------------
-// Router
+// DOCX path — paragraph-based, no captioning
 // ---------------------------------------------------------------------
 
-// Formats with no native rendering path of their own — converted to PDF
-// by Graph first, then handled by the exact same PDF pipeline.
-const CONVERT_TO_PDF_EXTENSIONS = [".docx", ".pptx"];
+async function indexDocxFile(
+  job: IndexFileMessage,
+  base64Content: string,
+  chunksDeleted: number
+): Promise<IndexFileResult> {
+  const text = await extractDocxText(base64Content);
+
+  if (!text) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "No text extracted from DOCX" };
+  }
+
+  const chunks = chunkText(text);
+
+  if (chunks.length === 0) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "Text produced zero chunks" };
+  }
+
+  console.log(`[INDEX-FILE] Split "${job.itemName}" into ${chunks.length} chunk(s).`);
+
+  // No vision calls here, so the only rate-limited call per chunk is the
+  // embedding — far cheaper than the PDF path. Still batched to avoid
+  // firing all chunks of a long document at once.
+  const CHUNK_BATCH_SIZE = 5;
+
+  let pagesIndexed = 0;
+  let pagesFailed = 0;
+
+  const processChunk = async (i: number): Promise<boolean> => {
+    const embedding = await generateEmbedding(chunks[i]);
+    if (!embedding) {
+      console.warn(`[INDEX-FILE] Failed to embed chunk ${i + 1} of "${job.itemName}".`);
+      return false;
+    }
+    return uploadDocument(buildDoc(job, i, chunks[i], embedding));
+  };
+
+  for (let start = 0; start < chunks.length; start += CHUNK_BATCH_SIZE) {
+    const batch: number[] = [];
+    for (let i = start; i < Math.min(start + CHUNK_BATCH_SIZE, chunks.length); i++) {
+      batch.push(i);
+    }
+
+    const results = await Promise.allSettled(batch.map(processChunk));
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error(
+          `[INDEX-FILE] Chunk processing threw for "${job.itemName}": ${result.reason}`
+        );
+        pagesFailed++;
+        continue;
+      }
+      if (result.value) pagesIndexed++;
+      else pagesFailed++;
+    }
+  }
+
+  return {
+    ok: pagesIndexed > 0,
+    pagesIndexed,
+    pagesFailed,
+    pagesCaptioned: 0,
+    pagesCaptionSkipped: 0,
+    chunksDeleted,
+  };
+}
+
+// ---------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------
 
 export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResult> {
   // On an update, remove old chunks FIRST. If a 5-chunk document becomes
@@ -223,7 +297,7 @@ export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResu
 
   const name = job.itemName.toLowerCase();
 
-  if (CONVERT_TO_PDF_EXTENSIONS.some((ext) => name.endsWith(ext))) {
+  if (name.endsWith(".pptx")) {
     const pdfContent = await downloadDriveFileAsPdf(job.driveId, job.itemId);
     if (!pdfContent) {
       return { ...EMPTY_RESULT, chunksDeleted, error: "PDF conversion failed" };
@@ -231,12 +305,17 @@ export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResu
     return indexPdfFile(job, pdfContent, chunksDeleted);
   }
 
+  const fileContent = await downloadDriveFile(job.driveId, job.itemId);
+  if (!fileContent) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "Download failed" };
+  }
+
   if (name.endsWith(".pdf")) {
-    const fileContent = await downloadDriveFile(job.driveId, job.itemId);
-    if (!fileContent) {
-      return { ...EMPTY_RESULT, chunksDeleted, error: "Download failed" };
-    }
     return indexPdfFile(job, fileContent.base64Content, chunksDeleted);
+  }
+
+  if (name.endsWith(".docx")) {
+    return indexDocxFile(job, fileContent.base64Content, chunksDeleted);
   }
 
   // Shouldn't happen — syncRunner filters to supported types — but fail
