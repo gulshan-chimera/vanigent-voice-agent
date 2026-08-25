@@ -3,9 +3,12 @@
 // TEMPORARY diagnostic — runs the caption prompt against specific pages
 // of a file and returns the raw model output, so prompt changes can be
 // checked without re-indexing.
+//
+// PPTX files are downloaded pre-converted to PDF (same as the real
+// indexing path in fileIndexer.ts) — pdfjs can't read a .pptx directly.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { downloadDriveFile } from "../lib/sharepointFiles";
+import { downloadDriveFile, downloadDriveFileAsPdf } from "../lib/sharepointFiles";
 import { extractPageTexts } from "../lib/pdfPageText";
 import { renderPdfPagesAsImages } from "../lib/pdfImages";
 import { generateImageCaption, SKIP_CAPTION } from "../lib/azureOpenAI";
@@ -36,8 +39,17 @@ export async function testCaptionPage(
     return { status: 404, jsonBody: { error: "File not found" } };
   }
 
-  const pageTexts = await extractPageTexts(fileContent.base64Content);
-  const pageImages = await renderPdfPagesAsImages(fileContent.base64Content);
+  const isPptx = fileContent.fileName.toLowerCase().endsWith(".pptx");
+  const pdfContent = isPptx
+    ? await downloadDriveFileAsPdf(body.driveId, body.itemId)
+    : fileContent.base64Content;
+
+  if (!pdfContent) {
+    return { status: 502, jsonBody: { error: "PDF conversion failed" } };
+  }
+
+  const pageTexts = await extractPageTexts(pdfContent);
+  const pageImages = await renderPdfPagesAsImages(pdfContent);
   const pageCount = Math.min(pageTexts.length, pageImages.length);
 
   // Default to all pages if none specified.
