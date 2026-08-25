@@ -82,7 +82,7 @@ export async function generateImageCaption(
 
   const url = `${config.endpoint}/openai/deployments/${config.chatDeployment}/chat/completions?api-version=2024-06-01`;
 
-  const prompt = `This image is a page from a company HR document. Here is the text already extracted from this same page:
+  const prompt = `This image is a page from an internal company document. Here is the text already extracted from this same page:
 
 """${pageText}"""
 

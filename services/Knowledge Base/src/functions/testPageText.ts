@@ -3,9 +3,12 @@
 // TEMPORARY diagnostic endpoint — confirms per-page text extraction
 // works and aligns with the page count we already confirmed via image
 // rendering, before building the full combine+caption+index pipeline.
+//
+// PPTX files are downloaded pre-converted to PDF (same as the real
+// indexing path in fileIndexer.ts) — pdfjs can't read a .pptx directly.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { downloadDriveFile } from "../lib/sharepointFiles";
+import { downloadDriveFile, downloadDriveFileAsPdf } from "../lib/sharepointFiles";
 import { extractPageTexts } from "../lib/pdfPageText";
 import {isRequestAuthorized} from "../lib/verifyWebhookAuth"
 export async function testPageText(
@@ -33,7 +36,16 @@ export async function testPageText(
     return { status: 404, jsonBody: { error: "File not found" } };
   }
 
-  const pageTexts = await extractPageTexts(fileContent.base64Content);
+  const isPptx = fileContent.fileName.toLowerCase().endsWith(".pptx");
+  const pdfContent = isPptx
+    ? await downloadDriveFileAsPdf(body.driveId, body.itemId)
+    : fileContent.base64Content;
+
+  if (!pdfContent) {
+    return { status: 502, jsonBody: { error: "PDF conversion failed" } };
+  }
+
+  const pageTexts = await extractPageTexts(pdfContent);
 
   return {
     status: 200,
