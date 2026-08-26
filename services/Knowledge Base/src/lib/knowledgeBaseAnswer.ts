@@ -33,7 +33,7 @@ export async function answerQuestion(question: string): Promise<string> {
             kind: "vector",
             vector: queryVector,
             fields: ["contentVector"],
-            kNearestNeighborsCount: 3,
+            kNearestNeighborsCount: 5,
           },
         ],
       },

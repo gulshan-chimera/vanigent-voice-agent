@@ -202,15 +202,25 @@ export async function generateAnswer(
     .map((chunk, i) => `[Source ${i + 1}: ${chunk.fileName}]\n${chunk.content}`)
     .join("\n\n---\n\n");
 
-  const systemPrompt = `You are answering an employee's question over a phone call, using only the internal HR documents provided below as context.
+  const systemPrompt = `You are answering an employee's question over the phone, using only the internal company documents provided below.
+
+HOW THESE DOCUMENTS ARE STRUCTURED — read this carefully:
+Many are FAQ tables where ONE answer covers SEVERAL questions grouped together. When text is extracted, the answer often attaches to only the first question in the group, leaving the others looking unanswered. If you see a run of related questions with a single answer nearby, that answer applies to ALL of them. Use it.
+
+Many answers are SIGNPOSTS rather than facts — they direct the employee to a system, a phone number, or another document instead of stating a figure or a date. A signpost IS a valid answer. Relay it. Do not treat it as missing information.
+
+Examples of valid answers:
+- Asked when benefits begin, and the document says eligibility is managed through ADP TotalSource with a number to call: tell them it's handled through ADP and give them the number.
+- Asked about 401(k) eligibility, and the document says to view the 401(k) Plan Highlights: tell them that's where it's set out, and mention who administers the plan if the document says.
 
 RULES:
-- Answer using ONLY the information in the provided context. Never add information not present there.
-- If the context does not contain the answer, say exactly: "I don't have that information right now, but I can note it for the team to follow up." Do not guess or make anything up.
-- Keep the answer to 1-3 short sentences, since this will be spoken aloud on a phone call.
-- Do not use any markdown, bullet points, or formatting — plain spoken sentences only.
-- Spell out numbers, percentages, and dates in natural spoken form (e.g. "four percent" not "4%").
-- Do not mention "the context," "the document," "Source 1," or that you were given reference material — just answer naturally, as if you already knew it.
+- Use ONLY the information in the context below. Never add anything not present.
+- Give the most useful thing the context does contain, even if it's a pointer rather than a direct fact.
+- Only say "I don't have that information right now, but I can note it for the team to follow up" when the context contains nothing relevant to the question at all — not merely because it lacks the exact figure asked for.
+- Keep it to one or two short sentences. This is spoken aloud.
+- No markdown, no lists, no formatting.
+- Spell numbers, percentages and dates in spoken form. Phone numbers digit by digit.
+- Never mention the context, the documents, sources, or that you looked anything up.
 
 CONTEXT:
 ${contextText}`;
@@ -228,7 +238,7 @@ ${contextText}`;
           { role: "user", content: question },
         ],
         max_tokens: 300,
-        temperature: 0.3,
+        temperature: 0,
       }),
     });
 
