@@ -1,0 +1,26 @@
+{
+  "name": "knowledge-base",
+  "version": "1.0.0",
+  "description": "Knowledge Base — SharePoint file access service for Vanigent Project",
+  "main": "dist/functions/*.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "start": "npm run build && func start",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@azure/data-tables": "^13.3.2",
+    "@azure/functions": "^4.5.0",
+    "@azure/search-documents": "^13.0.0",
+    "@azure/storage-queue": "^12.31.0",
+    "mammoth": "^1.12.1",
+    "pdf-to-img": "^6.2.0",
+    "pdfjs-dist": "^5.6.205"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.5.0"
+  }
+}
