@@ -10,7 +10,7 @@ import { CallerLookupResult, EntraUser } from "../types/vapi";
  * since numbers may be stored in different formats by different admins
  * (with/without +, with/without country code, spaced, dashed, etc.)
  */
-function buildPhoneVariants(rawNumber: string): string[] {
+export function buildPhoneVariants(rawNumber: string): string[] {
   const variants = new Set<string>();
 
   // Original, as received
@@ -42,7 +42,7 @@ function buildPhoneVariants(rawNumber: string): string[] {
 /**
  * Escapes single quotes in a string for safe use inside an OData filter.
  */
-function escapeODataValue(value: string): string {
+export function escapeODataValue(value: string): string {
   return value.replace(/'/g, "''");
 }
 
