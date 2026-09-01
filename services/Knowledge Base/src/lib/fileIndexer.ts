@@ -19,17 +19,23 @@
 //          captioning for DOCX is the trade-off for getting table
 //          content back to something the model can actually read.
 //
-//   PPTX — still converted to PDF via Graph (downloadDriveFileAsPdf,
-//          `?format=pdf`) and run through the PDF path unchanged, since
-//          that's the only way to get slide boundaries + vision
-//          captioning and this format hasn't shown the same table
-//          problem DOCX did.
+//   PPTX — extracted directly from the .pptx XML (pptxText.ts), one
+//          chunk per SLIDE (an author-defined boundary, the same role a
+//          PDF page plays), no vision captioning. Same rationale as
+//          DOCX: this used to go through Graph's PDF conversion for a
+//          uniform pipeline with PDF, but pdfjs's text extraction from
+//          the converted PDF reconstructs reading order from on-page
+//          position, which scrambled multi-column slide layouts (a step
+//          list beside a screenshot) badly enough that some content
+//          became unretrievable. Reading the slide XML directly avoids
+//          that, at the cost of no captioning for now.
 
-import { downloadDriveFile, downloadDriveFileAsPdf } from "./sharepointFiles";
+import { downloadDriveFile } from "./sharepointFiles";
 import { deleteFileChunks, uploadDocument, KbDocument } from "./searchIndex";
 import { extractPageTexts } from "./pdfPageText";
 import { renderPdfPagesAsImages } from "./pdfImages";
 import { extractDocxText } from "./docxText";
+import { extractPptxSlideTexts } from "./pptxText";
 import { chunkText } from "./textChunker";
 import { generateEmbedding, generateImageCaption, SKIP_CAPTION } from "./azureOpenAI";
 import { IndexFileMessage } from "./indexQueue";
@@ -282,6 +288,73 @@ async function indexDocxFile(
 }
 
 // ---------------------------------------------------------------------
+// PPTX path — slide-based, no captioning
+// ---------------------------------------------------------------------
+
+async function indexPptxFile(
+  job: IndexFileMessage,
+  base64Content: string,
+  chunksDeleted: number
+): Promise<IndexFileResult> {
+  const slideTexts = await extractPptxSlideTexts(base64Content);
+
+  if (slideTexts.length === 0) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "No slides extracted" };
+  }
+
+  const SLIDE_BATCH_SIZE = 5;
+  let pagesIndexed = 0;
+  let pagesFailed = 0;
+
+  const processSlide = async (i: number): Promise<boolean> => {
+    // A slide with no text (e.g. a title slide that's all imagery) must
+    // still be indexed — getIndexedFileState() identifies an indexed
+    // file by its chunkIndex 0 document, so an empty slide 1 would make
+    // the whole file invisible to the diff and it would re-index on
+    // every run.
+    const content =
+      slideTexts[i].trim() || `[Slide ${i + 1} of ${job.itemName} — no text content]`;
+
+    const embedding = await generateEmbedding(content);
+    if (!embedding) {
+      console.warn(`[INDEX-FILE] Failed to embed slide ${i + 1} of "${job.itemName}".`);
+      return false;
+    }
+    return uploadDocument(buildDoc(job, i, content, embedding));
+  };
+
+  for (let start = 0; start < slideTexts.length; start += SLIDE_BATCH_SIZE) {
+    const batch: number[] = [];
+    for (let i = start; i < Math.min(start + SLIDE_BATCH_SIZE, slideTexts.length); i++) {
+      batch.push(i);
+    }
+
+    const results = await Promise.allSettled(batch.map(processSlide));
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error(
+          `[INDEX-FILE] Slide processing threw for "${job.itemName}": ${result.reason}`
+        );
+        pagesFailed++;
+        continue;
+      }
+      if (result.value) pagesIndexed++;
+      else pagesFailed++;
+    }
+  }
+
+  return {
+    ok: pagesIndexed > 0,
+    pagesIndexed,
+    pagesFailed,
+    pagesCaptioned: 0,
+    pagesCaptionSkipped: 0,
+    chunksDeleted,
+  };
+}
+
+// ---------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------
 
@@ -295,20 +368,12 @@ export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResu
     console.log(`[INDEX-FILE] Removed ${chunksDeleted} old chunk(s) for "${job.itemName}".`);
   }
 
-  const name = job.itemName.toLowerCase();
-
-  if (name.endsWith(".pptx")) {
-    const pdfContent = await downloadDriveFileAsPdf(job.driveId, job.itemId);
-    if (!pdfContent) {
-      return { ...EMPTY_RESULT, chunksDeleted, error: "PDF conversion failed" };
-    }
-    return indexPdfFile(job, pdfContent, chunksDeleted);
-  }
-
   const fileContent = await downloadDriveFile(job.driveId, job.itemId);
   if (!fileContent) {
     return { ...EMPTY_RESULT, chunksDeleted, error: "Download failed" };
   }
+
+  const name = job.itemName.toLowerCase();
 
   if (name.endsWith(".pdf")) {
     return indexPdfFile(job, fileContent.base64Content, chunksDeleted);
@@ -316,6 +381,10 @@ export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResu
 
   if (name.endsWith(".docx")) {
     return indexDocxFile(job, fileContent.base64Content, chunksDeleted);
+  }
+
+  if (name.endsWith(".pptx")) {
+    return indexPptxFile(job, fileContent.base64Content, chunksDeleted);
   }
 
   // Shouldn't happen — syncRunner filters to supported types — but fail
