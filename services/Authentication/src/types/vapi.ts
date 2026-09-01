@@ -5,6 +5,8 @@
 export interface EntraUser {
   id: string;
   displayName: string;
+  mail?: string | null;
+  userPrincipalName?: string | null;
 }
 
 export interface CallerLookupResult {

@@ -74,7 +74,7 @@ export async function lookupCaller(rawNumber: string): Promise<CallerLookupResul
 
   const url = `https://graph.microsoft.com/v1.0/users?$filter=${encodeURIComponent(
     filter
-  )}&$select=id,displayName&$count=true`;
+  )}&$select=id,displayName,mail,userPrincipalName&$count=true`;
 
   try {
     const response = await fetch(url, {
