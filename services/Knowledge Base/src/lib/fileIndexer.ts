@@ -29,6 +29,16 @@
 //          list beside a screenshot) badly enough that some content
 //          became unretrievable. Reading the slide XML directly avoids
 //          that, at the cost of no captioning for now.
+//
+//   IMAGE (.png/.jpg/.jpeg) — a standalone image IS the entire document;
+//          there's no text layer to extract at all, so this is the one
+//          format where vision is the ONLY source of content rather
+//          than a supplement to it. Uses generateImageTranscription, a
+//          dedicated prompt from generateImageCaption's — that one is
+//          tuned to skip content already covered by separately
+//          extracted text and is heavily biased toward returning
+//          nothing, which would be wrong here. One chunk for the whole
+//          file (no page/slide concept for a single image).
 
 import { downloadDriveFile } from "./sharepointFiles";
 import { deleteFileChunks, uploadDocument, KbDocument } from "./searchIndex";
@@ -37,7 +47,12 @@ import { renderPdfPagesAsImages } from "./pdfImages";
 import { extractDocxText } from "./docxText";
 import { extractPptxSlideTexts } from "./pptxText";
 import { chunkText } from "./textChunker";
-import { generateEmbedding, generateImageCaption, SKIP_CAPTION } from "./azureOpenAI";
+import {
+  generateEmbedding,
+  generateImageCaption,
+  generateImageTranscription,
+  SKIP_CAPTION,
+} from "./azureOpenAI";
 import { IndexFileMessage } from "./indexQueue";
 
 export interface IndexFileResult {
@@ -355,8 +370,52 @@ async function indexPptxFile(
 }
 
 // ---------------------------------------------------------------------
+// Image path — single chunk, full transcription
+// ---------------------------------------------------------------------
+
+async function indexImageFile(
+  job: IndexFileMessage,
+  base64Content: string,
+  mimeType: string,
+  chunksDeleted: number
+): Promise<IndexFileResult> {
+  const transcription = await generateImageTranscription(base64Content, job.itemName, mimeType);
+
+  if (!transcription) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "Image transcription failed" };
+  }
+
+  const embedding = await generateEmbedding(transcription);
+  if (!embedding) {
+    return {
+      ...EMPTY_RESULT,
+      chunksDeleted,
+      pagesFailed: 1,
+      error: "Failed to embed image transcription",
+    };
+  }
+
+  const uploaded = await uploadDocument(buildDoc(job, 0, transcription, embedding));
+
+  return {
+    ok: uploaded,
+    pagesIndexed: uploaded ? 1 : 0,
+    pagesFailed: uploaded ? 0 : 1,
+    pagesCaptioned: uploaded ? 1 : 0,
+    pagesCaptionSkipped: 0,
+    chunksDeleted,
+  };
+}
+
+// ---------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+};
 
 export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResult> {
   // On an update, remove old chunks FIRST. If a 5-chunk document becomes
@@ -385,6 +444,11 @@ export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResu
 
   if (name.endsWith(".pptx")) {
     return indexPptxFile(job, fileContent.base64Content, chunksDeleted);
+  }
+
+  const imageExt = Object.keys(IMAGE_MIME_TYPES).find((ext) => name.endsWith(ext));
+  if (imageExt) {
+    return indexImageFile(job, fileContent.base64Content, IMAGE_MIME_TYPES[imageExt], chunksDeleted);
   }
 
   // Shouldn't happen — syncRunner filters to supported types — but fail
