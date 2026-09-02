@@ -101,7 +101,7 @@ stages:
       - deployment: Deploy_KnowledgeBase_Dev1
         displayName: 'Deploy to vanigent-ai-kb-dev1'
         condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
-        environment: 'vanigent-dev1'
+        environment: '$(adoEnvironment)'
         strategy:
           runOnce:
             deploy:
