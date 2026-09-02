@@ -10,6 +10,23 @@ import { CallerLookupResult, EntraUser } from "../types/vapi";
  * since numbers may be stored in different formats by different admins
  * (with/without +, with/without country code, spaced, dashed, etc.)
  */
+const SELECT_FIELDS = [
+  "id",
+  "displayName",
+  "givenName",
+  "surname",
+  "userPrincipalName",
+  "mail",
+  "mobilePhone",
+  "businessPhones",
+  "jobTitle",
+  "department",
+  "companyName",
+  "officeLocation",
+  "employeeId",
+  "city",
+  "country",
+].join(",");
 export function buildPhoneVariants(rawNumber: string): string[] {
   const variants = new Set<string>();
 
@@ -74,7 +91,7 @@ export async function lookupCaller(rawNumber: string): Promise<CallerLookupResul
 
   const url = `https://graph.microsoft.com/v1.0/users?$filter=${encodeURIComponent(
     filter
-  )}&$select=id,displayName,mail,userPrincipalName&$count=true`;
+  )}&$select=${SELECT_FIELDS}&$count=true`;
 
   try {
     const response = await fetch(url, {
@@ -108,7 +125,7 @@ export async function lookupCaller(rawNumber: string): Promise<CallerLookupResul
 
     const matchedUser = data.value[0];
     console.log(
-      `[CALLER-LOOKUP] Match found for ${rawNumber}: ${matchedUser.displayName} (${matchedUser.id})`
+      `[CALLER-LOOKUP] Match found for ${rawNumber}: ${matchedUser.displayName} (${matchedUser.id}) (${matchedUser.mail})`
     );
 
     return { isAuthenticated: true, user: matchedUser };
