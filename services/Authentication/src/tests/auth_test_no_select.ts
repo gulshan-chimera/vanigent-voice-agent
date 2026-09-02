@@ -1,52 +1,20 @@
-// src/tests/auth_test.ts
+// src/tests/auth_test_no_select.ts
 //
-// Manual Entra ID lookup tool. Type a phone number in the terminal and see
-// everything Microsoft Graph returns for the matching employee — this does
-// NOT go through VAPI or the webhook, it calls Graph directly.
+// Same manual Entra ID lookup as auth_test.ts, but the Graph query has NO
+// $select at all — this exists to show, side by side, that dropping $select
+// does NOT return "all" user fields. Graph falls back to its own small
+// default set of properties instead.
 //
 // Usage:
 //   npm run build
-//   npm run test:caller
-// (or: node dist/tests/auth_test.js)
+//   node dist/tests/auth_test_no_select.js
 
 import * as readline from "readline";
 import { getGraphAccessToken } from "../lib/graphAuth";
 import { buildPhoneVariants, escapeODataValue } from "../lib/callerLookup";
 import { loadEnvFileIfNeeded } from "./loadLocalEnv";
 
-// A wide $select — every standard Graph user field useful for confirming
-// who a caller is, not just the id/displayName the production lookup uses.
-const SELECT_FIELDS = [
-  "id",
-  "displayName",
-  "givenName",
-  "surname",
-  "userPrincipalName",
-  "mail",
-  "otherMails",
-  "mobilePhone",
-  "businessPhones",
-  "jobTitle",
-  "department",
-  "companyName",
-  "officeLocation",
-  "employeeId",
-  "employeeType",
-  "employeeHireDate",
-  "employeeOrgData",
-  "streetAddress",
-  "city",
-  "state",
-  "postalCode",
-  "country",
-  "userType",
-  "creationType",
-  "createdDateTime",
-  "preferredLanguage",
-  "accountEnabled",
-].join(",");
-
-async function fetchFullUserRecords(
+async function fetchUserRecords(
   rawNumber: string,
   token: string
 ): Promise<Record<string, unknown>[]> {
@@ -60,9 +28,10 @@ async function fetchFullUserRecords(
   }
   const filter = filterParts.join(" or ");
 
+  // No $select here on purpose.
   const url = `https://graph.microsoft.com/v1.0/users?$filter=${encodeURIComponent(
     filter
-  )}&$select=${SELECT_FIELDS}&$count=true`;
+  )}&$count=true`;
 
   const response = await fetch(url, {
     method: "GET",
@@ -102,14 +71,14 @@ async function runLookup(rawNumber: string): Promise<void> {
   }
 
   try {
-    const users = await fetchFullUserRecords(rawNumber, token);
+    const users = await fetchUserRecords(rawNumber, token);
 
     if (users.length === 0) {
       console.log(`\nNo Entra ID user matches "${rawNumber}".`);
       return;
     }
 
-    console.log(`\nFound ${users.length} match(es) for "${rawNumber}":`);
+    console.log(`\nFound ${users.length} match(es) for "${rawNumber}" (no $select applied):`);
     users.forEach(printUser);
   } catch (error) {
     console.error(`Lookup failed: ${(error as Error).message}`);
@@ -120,7 +89,7 @@ function main(): void {
   loadEnvFileIfNeeded();
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  console.log("Entra ID caller lookup — type a phone number, or 'exit' to quit.\n");
+  console.log("Entra ID caller lookup (NO $select) — type a phone number, or 'exit' to quit.\n");
 
   const ask = (): void => {
     rl.question("Phone number: ", async (answer) => {

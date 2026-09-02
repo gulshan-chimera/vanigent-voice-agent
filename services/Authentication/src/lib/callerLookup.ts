@@ -17,6 +17,7 @@ const SELECT_FIELDS = [
   "surname",
   "userPrincipalName",
   "mail",
+  "otherMails",
   "mobilePhone",
   "businessPhones",
   "jobTitle",
@@ -24,8 +25,19 @@ const SELECT_FIELDS = [
   "companyName",
   "officeLocation",
   "employeeId",
+  "employeeType",
+  "employeeHireDate",
+  "employeeOrgData",
+  "streetAddress",
   "city",
+  "state",
+  "postalCode",
   "country",
+  "userType",
+  "creationType",
+  "createdDateTime",
+  "preferredLanguage",
+  "accountEnabled",
 ].join(",");
 export function buildPhoneVariants(rawNumber: string): string[] {
   const variants = new Set<string>();
