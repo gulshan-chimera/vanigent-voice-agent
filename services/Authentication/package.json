@@ -8,7 +8,8 @@
     "watch": "tsc -w",
     "start": "npm run build && func start",
     "clean": "rimraf dist",
-    "test:caller": "npm run build && node dist/tests/auth_test.js"
+    "test:caller": "npm run build && node dist/tests/auth_test.js",
+    "test:callreport": "npm run build && node dist/tests/callReport_test.js"
   },
   "dependencies": {
     "@azure/functions": "^4.16.2"
