@@ -12,10 +12,8 @@
 // the VAPI side, to ensure requests genuinely originate from VAPI.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { lookupCaller } from "../lib/callerLookup";
-import { isRequestAuthorized } from "../lib/verifyWebhookAuth";
+import { lookupCaller, formatUserDetails } from "../lib/callerLookup";import { isRequestAuthorized } from "../lib/verifyWebhookAuth";
 import { VapiWebhookBody, VapiToolCallsResponse, VapiToolCallItem } from "../types/vapi";
-
 export async function vapiWebhook(
   request: HttpRequest,
   context: InvocationContext
@@ -64,9 +62,11 @@ export async function vapiWebhook(
     );
   }
 
-  const resultText = result.isAuthenticated
-    ? `AUTHORIZED. Caller name: ${result.user?.displayName}.`
-    : "UNAUTHORIZED. This caller is not a recognized employee.";
+  const resultText =
+    result.isAuthenticated && result.user
+      ? `AUTHORIZED.\n${formatUserDetails(result.user)}`
+      : "UNAUTHORIZED. This caller is not a recognized employee.";
+
 
   const response: VapiToolCallsResponse = {
     results: toolCallList.map((call: VapiToolCallItem) => ({

@@ -9,52 +9,10 @@
 //   npm run test:caller
 // (or: node dist/tests/auth_test.js)
 
-import * as fs from "fs";
-import * as path from "path";
 import * as readline from "readline";
 import { getGraphAccessToken } from "../lib/graphAuth";
 import { buildPhoneVariants, escapeODataValue } from "../lib/callerLookup";
-
-// Falls back to local.settings.json (the file `func start` normally reads)
-// or a .env file if TENANT_ID/CLIENT_ID/CLIENT_SECRET aren't already in the
-// environment — needed because this script runs as a plain node process,
-// not through the Azure Functions host.
-function loadEnvFileIfNeeded(): void {
-  if (process.env.TENANT_ID && process.env.CLIENT_ID && process.env.CLIENT_SECRET) {
-    return;
-  }
-
-  const root = path.join(__dirname, "..", "..");
-  loadFromLocalSettingsJson(path.join(root, "local.settings.json"));
-  loadFromDotEnv(path.join(root, ".env"));
-}
-
-function loadFromLocalSettingsJson(settingsPath: string): void {
-  if (!fs.existsSync(settingsPath)) return;
-
-  const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as {
-    Values?: Record<string, string>;
-  };
-
-  for (const [key, value] of Object.entries(parsed.Values ?? {})) {
-    if (key && !process.env[key]) process.env[key] = value;
-  }
-}
-
-function loadFromDotEnv(envPath: string): void {
-  if (!fs.existsSync(envPath)) return;
-
-  const lines = fs.readFileSync(envPath, "utf-8").split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const value = trimmed.slice(eq + 1).trim();
-    if (key && !process.env[key]) process.env[key] = value;
-  }
-}
+import { loadEnvFileIfNeeded } from "./loadLocalEnv";
 
 // A wide $select — every standard Graph user field useful for confirming
 // who a caller is, not just the id/displayName the production lookup uses.
@@ -65,6 +23,7 @@ const SELECT_FIELDS = [
   "surname",
   "userPrincipalName",
   "mail",
+  "otherMails",
   "mobilePhone",
   "businessPhones",
   "jobTitle",
@@ -72,8 +31,18 @@ const SELECT_FIELDS = [
   "companyName",
   "officeLocation",
   "employeeId",
+  "employeeType",
+  "employeeHireDate",
+  "employeeOrgData",
+  "streetAddress",
   "city",
+  "state",
+  "postalCode",
   "country",
+  "userType",
+  "creationType",
+  "createdDateTime",
+  "preferredLanguage",
   "accountEnabled",
 ].join(",");
 
@@ -111,7 +80,36 @@ async function fetchFullUserRecords(
   const data = (await response.json()) as { value: Record<string, unknown>[] };
   return data.value ?? [];
 }
+/**
+ * Fetches the user's manager as a separate request. Graph exposes manager
+ * as a relationship, not a property, and $expand is incompatible with the
+ * advanced-query filter we use on phone numbers — so it needs its own call.
+ */
+async function fetchManager(
+  userId: string,
+  token: string
+): Promise<Record<string, unknown> | null> {
+  const url = `https://graph.microsoft.com/v1.0/users/${userId}/manager?$select=id,displayName,mail,jobTitle,userPrincipalName,department`;
 
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  // 404 is the normal answer for "no manager assigned" — not an error.
+  if (response.status === 404) {
+    console.log("  (no manager assigned to this user)");
+    return null;
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`  Manager fetch failed (${response.status}): ${errorText}`);
+    return null;
+  }
+
+  return (await response.json()) as Record<string, unknown>;
+}
 function printUser(user: Record<string, unknown>, index: number): void {
   console.log(`\n--- Match ${index + 1} ---`);
   for (const [key, value] of Object.entries(user)) {
@@ -141,7 +139,22 @@ async function runLookup(rawNumber: string): Promise<void> {
     }
 
     console.log(`\nFound ${users.length} match(es) for "${rawNumber}":`);
-    users.forEach(printUser);
+
+    for (let i = 0; i < users.length; i++) {
+      printUser(users[i], i);
+
+      const userId = users[i].id;
+      if (typeof userId === "string") {
+        const manager = await fetchManager(userId, token);
+        if (manager) {
+          console.log(`\n  --- Manager ---`);
+          for (const [key, value] of Object.entries(manager)) {
+            if (key.startsWith("@")) continue;
+            console.log(`  ${key.padEnd(18)}: ${value ?? "(none)"}`);
+          }
+        }
+      }
+    }
   } catch (error) {
     console.error(`Lookup failed: ${(error as Error).message}`);
   }

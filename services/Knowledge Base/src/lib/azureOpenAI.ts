@@ -185,6 +185,110 @@ If there IS genuine visual content, describe only that. Do not mention the ignor
   return null;
 }
 /**
+ * Generates a full transcription/description of a STANDALONE image file
+ * (a .png/.jpg that IS the entire document — no accompanying text layer
+ * exists to supplement, unlike a PDF page). Deliberately a different
+ * prompt from generateImageCaption: that one is tuned to skip content
+ * already covered by separately-extracted text, and is heavily biased
+ * toward returning SKIP_CAPTION — exactly wrong here, where the image
+ * is the ONLY source of content and something must always be extracted
+ * from it. No SKIP_CAPTION concept for this function.
+ */
+export async function generateImageTranscription(
+  imageBase64: string,
+  fileName: string,
+  mimeType: string = "image/png"
+): Promise<string | null> {
+  const config = getConfig();
+  if (!config) return null;
+
+  const url = `${config.endpoint}/openai/deployments/${config.chatDeployment}/chat/completions?api-version=2024-06-01`;
+
+  const prompt = `This image IS the entire content of a document named "${fileName}" — there is no separate extracted text layer for it; everything a reader needs must come from what you read in this image.
+
+Transcribe and describe ALL informational content precisely:
+- If it's a table, reproduce every row as plain text (e.g. "New Year's Day — January 1, 2025"). Do not summarize or skip rows for brevity — every row matters.
+- If it's a list, form, or diagram, capture the actual content and structure, not just a general description of what kind of image it is.
+- If it's a scanned or photographed document, transcribe the text as accurately as you can read it.
+- Preserve exact numbers, dates, and names — do not paraphrase or round them.
+
+Do not describe layout, colors, or formatting unless that visual structure is itself the information (e.g. a flowchart's arrows). Focus entirely on the data.`;
+
+  const requestOptions = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": config.apiKey,
+    },
+    body: JSON.stringify({
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: { url: `data:${mimeType};base64,${imageBase64}` },
+            },
+          ],
+        },
+      ],
+      max_tokens: 1000,
+      temperature: 0,
+    }),
+  };
+
+  // Same retry-on-429 rationale as generateImageCaption: without it, a
+  // rate limit returns null indistinguishably from a real failure, and
+  // this file's ENTIRE content silently vanishes from the index.
+  const MAX_ATTEMPTS = 4;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, requestOptions);
+
+      if (response.status === 429) {
+        if (attempt === MAX_ATTEMPTS) {
+          console.error(
+            `[AZURE-OPENAI] Still rate limited after ${MAX_ATTEMPTS} attempts — giving up on "${fileName}".`
+          );
+          return null;
+        }
+
+        const retryAfterHeader = response.headers.get("retry-after");
+        const baseSeconds = retryAfterHeader
+          ? Number(retryAfterHeader)
+          : 5 * Math.pow(2, attempt - 1);
+
+        const waitSeconds = baseSeconds + Math.random() * 5;
+
+        console.warn(
+          `[AZURE-OPENAI] Rate limited (attempt ${attempt}/${MAX_ATTEMPTS}) — waiting ${waitSeconds}s.`
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1000));
+        continue;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(
+          `[AZURE-OPENAI] Image transcription failed (${response.status}): ${errorText}`
+        );
+        return null;
+      }
+
+      const data = (await response.json()) as { choices: { message: { content: string } }[] };
+      return data.choices[0].message.content.trim();
+    } catch (error) {
+      console.error(`[AZURE-OPENAI] Image transcription network error: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Generates a natural, spoken-style answer to the caller's question,
  * grounded strictly in the provided context chunks. Returns null on
  * failure so the caller can decide how to handle it (fail closed).

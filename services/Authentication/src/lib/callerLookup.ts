@@ -10,6 +10,26 @@ import { CallerLookupResult, EntraUser } from "../types/vapi";
  * since numbers may be stored in different formats by different admins
  * (with/without +, with/without country code, spaced, dashed, etc.)
  */
+const SELECT_FIELDS = [
+  "id",
+  "displayName",
+  "givenName",
+  "surname",
+  "userPrincipalName",
+  "mail",
+  "otherMails",
+  "mobilePhone",
+  "businessPhones",
+  "jobTitle",
+  "department",
+  "companyName",
+  "officeLocation",
+  "employeeId",
+  "employeeType",
+  "employeeHireDate",
+  "preferredLanguage",
+  "accountEnabled",
+].join(",");
 export function buildPhoneVariants(rawNumber: string): string[] {
   const variants = new Set<string>();
 
@@ -74,7 +94,7 @@ export async function lookupCaller(rawNumber: string): Promise<CallerLookupResul
 
   const url = `https://graph.microsoft.com/v1.0/users?$filter=${encodeURIComponent(
     filter
-  )}&$select=id,displayName,mail,userPrincipalName&$count=true`;
+  )}&$select=${SELECT_FIELDS}&$count=true`;
 
   try {
     const response = await fetch(url, {
@@ -108,7 +128,7 @@ export async function lookupCaller(rawNumber: string): Promise<CallerLookupResul
 
     const matchedUser = data.value[0];
     console.log(
-      `[CALLER-LOOKUP] Match found for ${rawNumber}: ${matchedUser.displayName} (${matchedUser.id})`
+      `[CALLER-LOOKUP] Match found for ${rawNumber}: ${matchedUser.displayName} (${matchedUser.id}) (${matchedUser.mail})`
     );
 
     return { isAuthenticated: true, user: matchedUser };
@@ -118,4 +138,33 @@ export async function lookupCaller(rawNumber: string): Promise<CallerLookupResul
     );
     return notAuthenticated;
   }
+}
+
+export function formatUserDetails(user: EntraUser): string {
+  const fields: [string, string | undefined][] = [
+    ["Job title", user.jobTitle ?? undefined],
+    ["Department", user.department ?? undefined],
+    ["Company", user.companyName ?? undefined],
+    ["Office location", user.officeLocation ?? undefined],
+    ["Employee ID", user.employeeId ?? undefined],
+    ["Employee type", user.employeeType ?? undefined],
+    ["Hire date", user.employeeHireDate ?? undefined],
+    ["User principal name", user.userPrincipalName ?? undefined],
+    ["Email", user.mail ?? undefined],
+    ["Other emails", user.otherMails?.join(", ")],
+    ["Mobile phone", user.mobilePhone ?? undefined],
+    ["Business phone", user.businessPhones?.join(", ")],
+    ["Preferred language", user.preferredLanguage ?? undefined],
+    [
+      "Account enabled",
+      typeof user.accountEnabled === "boolean" ? String(user.accountEnabled) : undefined,
+    ],
+  ];
+
+  const lines = [`Caller name: ${user.displayName}`];
+  for (const [label, value] of fields) {
+    if (value) lines.push(`${label}: ${value}`);
+  }
+
+  return lines.join("\n");
 }
