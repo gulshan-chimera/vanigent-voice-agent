@@ -79,25 +79,31 @@ const resultText = result.isAuthenticated && result.user
   return jsonResponse(200, response);
 }
 function formatUserDetails(user: EntraUser): string {
-  const lines: string[] = [`Caller name: ${user.displayName}`];
+  const fields: [string, string | undefined][] = [
+    ["Job title", user.jobTitle ?? undefined],
+    ["Department", user.department ?? undefined],
+    ["Company", user.companyName ?? undefined],
+    ["Office location", user.officeLocation ?? undefined],
+    ["Employee ID", user.employeeId ?? undefined],
+    ["Employee type", user.employeeType ?? undefined],
+    ["Hire date", user.employeeHireDate ?? undefined],
+    ["User principal name", user.userPrincipalName ?? undefined],
+    ["Email", user.mail ?? undefined],
+    ["Other emails", user.otherMails?.join(", ")],
+    ["Mobile phone", user.mobilePhone ?? undefined],
+    ["Business phone", user.businessPhones?.join(", ")],
+    ["Preferred language", user.preferredLanguage ?? undefined],
+    ["Account enabled", typeof user.accountEnabled === "boolean" ? String(user.accountEnabled) : undefined],
+  ];
 
-  if (user.jobTitle) lines.push(`Job title: ${user.jobTitle}`);
-  if (user.department) lines.push(`Department: ${user.department}`);
-  if (user.companyName) lines.push(`Company: ${user.companyName}`);
-  if (user.officeLocation) lines.push(`Office location: ${user.officeLocation}`);
-  if (user.employeeId) lines.push(`Employee ID: ${user.employeeId}`);
-  if (user.employeeType) lines.push(`Employee type: ${user.employeeType}`);
-  if (user.employeeHireDate) lines.push(`Hire date: ${user.employeeHireDate}`);
-  if (user.userPrincipalName) lines.push(`User principal name: ${user.userPrincipalName}`);
-  if (user.mail) lines.push(`Email: ${user.mail}`);
-  if (user.otherMails?.length) lines.push(`Other emails: ${user.otherMails.join(", ")}`);
-  if (user.mobilePhone) lines.push(`Mobile phone: ${user.mobilePhone}`);
-  if (user.businessPhones?.length) lines.push(`Business phone: ${user.businessPhones.join(", ")}`);
-  if (user.preferredLanguage) lines.push(`Preferred language: ${user.preferredLanguage}`);
-  if (typeof user.accountEnabled === "boolean") lines.push(`Account enabled: ${user.accountEnabled}`);
+  const lines = [`Caller name: ${user.displayName}`];
+  for (const [label, value] of fields) {
+    if (value) lines.push(`${label}: ${value}`);
+  }
 
   return lines.join("\n");
 }
+
 
 function jsonResponse(status: number, body: unknown): HttpResponseInit {
   return {
