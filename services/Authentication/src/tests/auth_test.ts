@@ -80,7 +80,36 @@ async function fetchFullUserRecords(
   const data = (await response.json()) as { value: Record<string, unknown>[] };
   return data.value ?? [];
 }
+/**
+ * Fetches the user's manager as a separate request. Graph exposes manager
+ * as a relationship, not a property, and $expand is incompatible with the
+ * advanced-query filter we use on phone numbers — so it needs its own call.
+ */
+async function fetchManager(
+  userId: string,
+  token: string
+): Promise<Record<string, unknown> | null> {
+  const url = `https://graph.microsoft.com/v1.0/users/${userId}/manager?$select=id,displayName,mail,jobTitle,userPrincipalName,department`;
 
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  // 404 is the normal answer for "no manager assigned" — not an error.
+  if (response.status === 404) {
+    console.log("  (no manager assigned to this user)");
+    return null;
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`  Manager fetch failed (${response.status}): ${errorText}`);
+    return null;
+  }
+
+  return (await response.json()) as Record<string, unknown>;
+}
 function printUser(user: Record<string, unknown>, index: number): void {
   console.log(`\n--- Match ${index + 1} ---`);
   for (const [key, value] of Object.entries(user)) {
@@ -110,7 +139,22 @@ async function runLookup(rawNumber: string): Promise<void> {
     }
 
     console.log(`\nFound ${users.length} match(es) for "${rawNumber}":`);
-    users.forEach(printUser);
+
+    for (let i = 0; i < users.length; i++) {
+      printUser(users[i], i);
+
+      const userId = users[i].id;
+      if (typeof userId === "string") {
+        const manager = await fetchManager(userId, token);
+        if (manager) {
+          console.log(`\n  --- Manager ---`);
+          for (const [key, value] of Object.entries(manager)) {
+            if (key.startsWith("@")) continue;
+            console.log(`  ${key.padEnd(18)}: ${value ?? "(none)"}`);
+          }
+        }
+      }
+    }
   } catch (error) {
     console.error(`Lookup failed: ${(error as Error).message}`);
   }

@@ -12,10 +12,8 @@
 // the VAPI side, to ensure requests genuinely originate from VAPI.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { lookupCaller } from "../lib/callerLookup";
-import { isRequestAuthorized } from "../lib/verifyWebhookAuth";
-import { VapiWebhookBody, VapiToolCallsResponse, VapiToolCallItem, EntraUser } from "../types/vapi";
-
+import { lookupCaller, formatUserDetails } from "../lib/callerLookup";import { isRequestAuthorized } from "../lib/verifyWebhookAuth";
+import { VapiWebhookBody, VapiToolCallsResponse, VapiToolCallItem } from "../types/vapi";
 export async function vapiWebhook(
   request: HttpRequest,
   context: InvocationContext
@@ -64,9 +62,10 @@ export async function vapiWebhook(
     );
   }
 
-const resultText = result.isAuthenticated && result.user
-  ? `AUTHORIZED.\n${formatUserDetails(result.user)}`
-  : "UNAUTHORIZED. This caller is not a recognized employee.";
+  const resultText =
+    result.isAuthenticated && result.user
+      ? `AUTHORIZED.\n${formatUserDetails(result.user)}`
+      : "UNAUTHORIZED. This caller is not a recognized employee.";
 
 
   const response: VapiToolCallsResponse = {
@@ -78,32 +77,6 @@ const resultText = result.isAuthenticated && result.user
 
   return jsonResponse(200, response);
 }
-function formatUserDetails(user: EntraUser): string {
-  const fields: [string, string | undefined][] = [
-    ["Job title", user.jobTitle ?? undefined],
-    ["Department", user.department ?? undefined],
-    ["Company", user.companyName ?? undefined],
-    ["Office location", user.officeLocation ?? undefined],
-    ["Employee ID", user.employeeId ?? undefined],
-    ["Employee type", user.employeeType ?? undefined],
-    ["Hire date", user.employeeHireDate ?? undefined],
-    ["User principal name", user.userPrincipalName ?? undefined],
-    ["Email", user.mail ?? undefined],
-    ["Other emails", user.otherMails?.join(", ")],
-    ["Mobile phone", user.mobilePhone ?? undefined],
-    ["Business phone", user.businessPhones?.join(", ")],
-    ["Preferred language", user.preferredLanguage ?? undefined],
-    ["Account enabled", typeof user.accountEnabled === "boolean" ? String(user.accountEnabled) : undefined],
-  ];
-
-  const lines = [`Caller name: ${user.displayName}`];
-  for (const [label, value] of fields) {
-    if (value) lines.push(`${label}: ${value}`);
-  }
-
-  return lines.join("\n");
-}
-
 
 function jsonResponse(status: number, body: unknown): HttpResponseInit {
   return {
