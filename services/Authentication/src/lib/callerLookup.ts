@@ -139,3 +139,32 @@ export async function lookupCaller(rawNumber: string): Promise<CallerLookupResul
     return notAuthenticated;
   }
 }
+
+export function formatUserDetails(user: EntraUser): string {
+  const fields: [string, string | undefined][] = [
+    ["Job title", user.jobTitle ?? undefined],
+    ["Department", user.department ?? undefined],
+    ["Company", user.companyName ?? undefined],
+    ["Office location", user.officeLocation ?? undefined],
+    ["Employee ID", user.employeeId ?? undefined],
+    ["Employee type", user.employeeType ?? undefined],
+    ["Hire date", user.employeeHireDate ?? undefined],
+    ["User principal name", user.userPrincipalName ?? undefined],
+    ["Email", user.mail ?? undefined],
+    ["Other emails", user.otherMails?.join(", ")],
+    ["Mobile phone", user.mobilePhone ?? undefined],
+    ["Business phone", user.businessPhones?.join(", ")],
+    ["Preferred language", user.preferredLanguage ?? undefined],
+    [
+      "Account enabled",
+      typeof user.accountEnabled === "boolean" ? String(user.accountEnabled) : undefined,
+    ],
+  ];
+
+  const lines = [`Caller name: ${user.displayName}`];
+  for (const [label, value] of fields) {
+    if (value) lines.push(`${label}: ${value}`);
+  }
+
+  return lines.join("\n");
+}
