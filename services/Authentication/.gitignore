@@ -3,3 +3,4 @@ dist/
 local.settings.json
 .env
 *.log
+call-reports/

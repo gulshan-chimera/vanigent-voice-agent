@@ -5,7 +5,24 @@
 export interface EntraUser {
   id: string;
   displayName: string;
+  givenName?: string | null;
+  surname?: string | null;
+  userPrincipalName?: string | null;
+  mail?: string | null;
+  otherMails?: string[];
+  mobilePhone?: string | null;
+  businessPhones?: string[];
+  jobTitle?: string | null;
+  department?: string | null;
+  companyName?: string | null;
+  officeLocation?: string | null;
+  employeeId?: string | null;
+  employeeType?: string | null;
+  employeeHireDate?: string | null;
+  preferredLanguage?: string | null;
+  accountEnabled?: boolean;
 }
+
 
 export interface CallerLookupResult {
   isAuthenticated: boolean;

@@ -19,19 +19,40 @@
 //          captioning for DOCX is the trade-off for getting table
 //          content back to something the model can actually read.
 //
-//   PPTX — still converted to PDF via Graph (downloadDriveFileAsPdf,
-//          `?format=pdf`) and run through the PDF path unchanged, since
-//          that's the only way to get slide boundaries + vision
-//          captioning and this format hasn't shown the same table
-//          problem DOCX did.
+//   PPTX — extracted directly from the .pptx XML (pptxText.ts), one
+//          chunk per SLIDE (an author-defined boundary, the same role a
+//          PDF page plays), no vision captioning. Same rationale as
+//          DOCX: this used to go through Graph's PDF conversion for a
+//          uniform pipeline with PDF, but pdfjs's text extraction from
+//          the converted PDF reconstructs reading order from on-page
+//          position, which scrambled multi-column slide layouts (a step
+//          list beside a screenshot) badly enough that some content
+//          became unretrievable. Reading the slide XML directly avoids
+//          that, at the cost of no captioning for now.
+//
+//   IMAGE (.png/.jpg/.jpeg) — a standalone image IS the entire document;
+//          there's no text layer to extract at all, so this is the one
+//          format where vision is the ONLY source of content rather
+//          than a supplement to it. Uses generateImageTranscription, a
+//          dedicated prompt from generateImageCaption's — that one is
+//          tuned to skip content already covered by separately
+//          extracted text and is heavily biased toward returning
+//          nothing, which would be wrong here. One chunk for the whole
+//          file (no page/slide concept for a single image).
 
-import { downloadDriveFile, downloadDriveFileAsPdf } from "./sharepointFiles";
+import { downloadDriveFile } from "./sharepointFiles";
 import { deleteFileChunks, uploadDocument, KbDocument } from "./searchIndex";
 import { extractPageTexts } from "./pdfPageText";
 import { renderPdfPagesAsImages } from "./pdfImages";
 import { extractDocxText } from "./docxText";
+import { extractPptxSlideTexts } from "./pptxText";
 import { chunkText } from "./textChunker";
-import { generateEmbedding, generateImageCaption, SKIP_CAPTION } from "./azureOpenAI";
+import {
+  generateEmbedding,
+  generateImageCaption,
+  generateImageTranscription,
+  SKIP_CAPTION,
+} from "./azureOpenAI";
 import { IndexFileMessage } from "./indexQueue";
 
 export interface IndexFileResult {
@@ -282,8 +303,119 @@ async function indexDocxFile(
 }
 
 // ---------------------------------------------------------------------
+// PPTX path — slide-based, no captioning
+// ---------------------------------------------------------------------
+
+async function indexPptxFile(
+  job: IndexFileMessage,
+  base64Content: string,
+  chunksDeleted: number
+): Promise<IndexFileResult> {
+  const slideTexts = await extractPptxSlideTexts(base64Content);
+
+  if (slideTexts.length === 0) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "No slides extracted" };
+  }
+
+  const SLIDE_BATCH_SIZE = 5;
+  let pagesIndexed = 0;
+  let pagesFailed = 0;
+
+  const processSlide = async (i: number): Promise<boolean> => {
+    // A slide with no text (e.g. a title slide that's all imagery) must
+    // still be indexed — getIndexedFileState() identifies an indexed
+    // file by its chunkIndex 0 document, so an empty slide 1 would make
+    // the whole file invisible to the diff and it would re-index on
+    // every run.
+    const content =
+      slideTexts[i].trim() || `[Slide ${i + 1} of ${job.itemName} — no text content]`;
+
+    const embedding = await generateEmbedding(content);
+    if (!embedding) {
+      console.warn(`[INDEX-FILE] Failed to embed slide ${i + 1} of "${job.itemName}".`);
+      return false;
+    }
+    return uploadDocument(buildDoc(job, i, content, embedding));
+  };
+
+  for (let start = 0; start < slideTexts.length; start += SLIDE_BATCH_SIZE) {
+    const batch: number[] = [];
+    for (let i = start; i < Math.min(start + SLIDE_BATCH_SIZE, slideTexts.length); i++) {
+      batch.push(i);
+    }
+
+    const results = await Promise.allSettled(batch.map(processSlide));
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error(
+          `[INDEX-FILE] Slide processing threw for "${job.itemName}": ${result.reason}`
+        );
+        pagesFailed++;
+        continue;
+      }
+      if (result.value) pagesIndexed++;
+      else pagesFailed++;
+    }
+  }
+
+  return {
+    ok: pagesIndexed > 0,
+    pagesIndexed,
+    pagesFailed,
+    pagesCaptioned: 0,
+    pagesCaptionSkipped: 0,
+    chunksDeleted,
+  };
+}
+
+// ---------------------------------------------------------------------
+// Image path — single chunk, full transcription
+// ---------------------------------------------------------------------
+
+async function indexImageFile(
+  job: IndexFileMessage,
+  base64Content: string,
+  mimeType: string,
+  chunksDeleted: number
+): Promise<IndexFileResult> {
+  const transcription = await generateImageTranscription(base64Content, job.itemName, mimeType);
+
+  if (!transcription) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "Image transcription failed" };
+  }
+
+  const embedding = await generateEmbedding(transcription);
+  if (!embedding) {
+    return {
+      ...EMPTY_RESULT,
+      chunksDeleted,
+      pagesFailed: 1,
+      error: "Failed to embed image transcription",
+    };
+  }
+
+  const uploaded = await uploadDocument(buildDoc(job, 0, transcription, embedding));
+
+  return {
+    ok: uploaded,
+    pagesIndexed: uploaded ? 1 : 0,
+    pagesFailed: uploaded ? 0 : 1,
+    pagesCaptioned: uploaded ? 1 : 0,
+    pagesCaptionSkipped: 0,
+    chunksDeleted,
+  };
+}
+
+// ---------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+};
 
 export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResult> {
   // On an update, remove old chunks FIRST. If a 5-chunk document becomes
@@ -295,20 +427,12 @@ export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResu
     console.log(`[INDEX-FILE] Removed ${chunksDeleted} old chunk(s) for "${job.itemName}".`);
   }
 
-  const name = job.itemName.toLowerCase();
-
-  if (name.endsWith(".pptx")) {
-    const pdfContent = await downloadDriveFileAsPdf(job.driveId, job.itemId);
-    if (!pdfContent) {
-      return { ...EMPTY_RESULT, chunksDeleted, error: "PDF conversion failed" };
-    }
-    return indexPdfFile(job, pdfContent, chunksDeleted);
-  }
-
   const fileContent = await downloadDriveFile(job.driveId, job.itemId);
   if (!fileContent) {
     return { ...EMPTY_RESULT, chunksDeleted, error: "Download failed" };
   }
+
+  const name = job.itemName.toLowerCase();
 
   if (name.endsWith(".pdf")) {
     return indexPdfFile(job, fileContent.base64Content, chunksDeleted);
@@ -316,6 +440,15 @@ export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResu
 
   if (name.endsWith(".docx")) {
     return indexDocxFile(job, fileContent.base64Content, chunksDeleted);
+  }
+
+  if (name.endsWith(".pptx")) {
+    return indexPptxFile(job, fileContent.base64Content, chunksDeleted);
+  }
+
+  const imageExt = Object.keys(IMAGE_MIME_TYPES).find((ext) => name.endsWith(ext));
+  if (imageExt) {
+    return indexImageFile(job, fileContent.base64Content, IMAGE_MIME_TYPES[imageExt], chunksDeleted);
   }
 
   // Shouldn't happen — syncRunner filters to supported types — but fail
