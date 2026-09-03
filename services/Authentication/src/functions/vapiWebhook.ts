@@ -14,7 +14,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { lookupCaller } from "../lib/callerLookup";
 import { isRequestAuthorized } from "../lib/verifyWebhookAuth";
-import { VapiWebhookBody, VapiToolCallsResponse, VapiToolCallItem } from "../types/vapi";
+import { VapiWebhookBody, VapiToolCallsResponse, VapiToolCallItem, EntraUser } from "../types/vapi";
 
 export async function vapiWebhook(
   request: HttpRequest,
@@ -64,9 +64,10 @@ export async function vapiWebhook(
     );
   }
 
-  const resultText = result.isAuthenticated
-    ? `AUTHORIZED. Caller name: ${result.user?.displayName}.`
-    : "UNAUTHORIZED. This caller is not a recognized employee.";
+const resultText = result.isAuthenticated && result.user
+  ? `AUTHORIZED.\n${formatUserDetails(result.user)}`
+  : "UNAUTHORIZED. This caller is not a recognized employee.";
+
 
   const response: VapiToolCallsResponse = {
     results: toolCallList.map((call: VapiToolCallItem) => ({
@@ -76,6 +77,26 @@ export async function vapiWebhook(
   };
 
   return jsonResponse(200, response);
+}
+function formatUserDetails(user: EntraUser): string {
+  const lines: string[] = [`Caller name: ${user.displayName}`];
+
+  if (user.jobTitle) lines.push(`Job title: ${user.jobTitle}`);
+  if (user.department) lines.push(`Department: ${user.department}`);
+  if (user.companyName) lines.push(`Company: ${user.companyName}`);
+  if (user.officeLocation) lines.push(`Office location: ${user.officeLocation}`);
+  if (user.employeeId) lines.push(`Employee ID: ${user.employeeId}`);
+  if (user.employeeType) lines.push(`Employee type: ${user.employeeType}`);
+  if (user.employeeHireDate) lines.push(`Hire date: ${user.employeeHireDate}`);
+  if (user.userPrincipalName) lines.push(`User principal name: ${user.userPrincipalName}`);
+  if (user.mail) lines.push(`Email: ${user.mail}`);
+  if (user.otherMails?.length) lines.push(`Other emails: ${user.otherMails.join(", ")}`);
+  if (user.mobilePhone) lines.push(`Mobile phone: ${user.mobilePhone}`);
+  if (user.businessPhones?.length) lines.push(`Business phone: ${user.businessPhones.join(", ")}`);
+  if (user.preferredLanguage) lines.push(`Preferred language: ${user.preferredLanguage}`);
+  if (typeof user.accountEnabled === "boolean") lines.push(`Account enabled: ${user.accountEnabled}`);
+
+  return lines.join("\n");
 }
 
 function jsonResponse(status: number, body: unknown): HttpResponseInit {
