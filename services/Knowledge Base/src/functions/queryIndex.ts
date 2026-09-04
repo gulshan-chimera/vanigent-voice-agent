@@ -42,7 +42,7 @@ export async function queryIndex(
   }
 
   try {
-    const results = await searchClient.search("*", {
+    const results = await searchClient.search(body.query, {
       vectorSearchOptions: {
         queries: [
           {
@@ -53,6 +53,12 @@ export async function queryIndex(
           },
         ],
       },
+      queryType: "semantic",
+      semanticSearchOptions: {
+        configurationName: "kb-semantic-config",
+        errorMode: "partial",
+      },
+      top: 5,
     });
 
     const matches = [];

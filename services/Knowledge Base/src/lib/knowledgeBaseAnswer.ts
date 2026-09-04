@@ -26,7 +26,7 @@ export async function answerQuestion(question: string): Promise<string> {
   const contextChunks: { fileName: string; content: string }[] = [];
 
   try {
-    const results = await searchClient.search("*", {
+    const results = await searchClient.search(question, {
       vectorSearchOptions: {
         queries: [
           {
@@ -37,6 +37,12 @@ export async function answerQuestion(question: string): Promise<string> {
           },
         ],
       },
+      queryType: "semantic",
+      semanticSearchOptions: {
+        configurationName: "kb-semantic-config",
+        errorMode: "partial",
+      },
+      top: 5,
     });
 
     for await (const result of results.results) {

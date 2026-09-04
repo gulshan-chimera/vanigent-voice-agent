@@ -116,6 +116,17 @@ export async function ensureIndexExists(): Promise<boolean> {
       algorithms: [{ name: "kb-hnsw", kind: "hnsw" }],
       profiles: [{ name: "kb-vector-profile", algorithmConfigurationName: "kb-hnsw" }],
     },
+    semanticSearch: {
+      configurations: [
+        {
+          name: "kb-semantic-config",
+          prioritizedFields: {
+            contentFields: [{ name: "content" }],
+            keywordsFields: [{ name: "fileName" }, { name: "library" }],
+          },
+        },
+      ],
+    },
   };
 
   try {
