@@ -26,31 +26,54 @@ export async function answerQuestion(question: string): Promise<string> {
   const contextChunks: { fileName: string; content: string }[] = [];
 
   try {
-    const results = await searchClient.search("*", {
+    const results = await searchClient.search(question, {
       vectorSearchOptions: {
         queries: [
           {
             kind: "vector",
             vector: queryVector,
             fields: ["contentVector"],
-            kNearestNeighborsCount: 5,
+            kNearestNeighborsCount: 15,
           },
         ],
       },
+      queryType: "semantic",
+      semanticSearchOptions: {
+        configurationName: "kb-semantic-config",
+        errorMode: "partial",
+      },
+      top: 5,
     });
 
+    let chunkIdx = 0;
     for await (const result of results.results) {
+      // With hybrid search (RRF fusion), scores are typically in the
+      // 0.01–0.03 range. Filter out truly unrelated chunks so the LLM
+      // doesn't see irrelevant noise.
+      if (result.score !== undefined && result.score < 0.005) {
+        console.log(
+          `[KB-ANSWER] Skipping chunk ${chunkIdx}: score=${result.score?.toFixed(4)} file="${result.document.fileName}" (below threshold)`
+        );
+        chunkIdx++;
+        continue;
+      }
+
+      console.log(
+        `[KB-ANSWER] Chunk ${chunkIdx}: score=${result.score?.toFixed(4)} file="${result.document.fileName}" content="${result.document.content.slice(0, 80)}..."`
+      );
+
       contextChunks.push({
         fileName: result.document.fileName,
         content: result.document.content,
       });
+      chunkIdx++;
     }
   } catch (error) {
     console.error(`[KB-ANSWER] Search failed: ${(error as Error).message}`);
     return FALLBACK_ANSWER;
   }
 
-  console.log(`[KB-ANSWER] Retrieved ${contextChunks.length} chunk(s) for question: "${question}"`);
+  console.log(`[KB-ANSWER] Retrieved ${contextChunks.length} relevant chunk(s) for question: "${question}"`);
 
   if (contextChunks.length === 0) {
     console.warn("[KB-ANSWER] Zero chunks returned from search — returning fallback.");

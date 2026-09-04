@@ -42,17 +42,23 @@ export async function queryIndex(
   }
 
   try {
-    const results = await searchClient.search("*", {
+    const results = await searchClient.search(body.query, {
       vectorSearchOptions: {
         queries: [
           {
             kind: "vector",
             vector: queryVector,
             fields: ["contentVector"],
-            kNearestNeighborsCount: 3,
+            kNearestNeighborsCount: 10,
           },
         ],
       },
+      queryType: "semantic",
+      semanticSearchOptions: {
+        configurationName: "kb-semantic-config",
+        errorMode: "partial",
+      },
+      top: 5,
     });
 
     const matches = [];
