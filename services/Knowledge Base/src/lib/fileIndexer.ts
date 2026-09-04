@@ -114,9 +114,7 @@ const EMPTY_RESULT: IndexFileResult = {
   chunksDeleted: 0,
 };
 
-// ---------------------------------------------------------------------
-// PDF path — page-based, with vision captioning
-// ---------------------------------------------------------------------
+const SPLIT_THRESHOLD_CHARS = 1200;
 
 async function indexPdfFile(
   job: IndexFileMessage,
@@ -137,19 +135,25 @@ async function indexPdfFile(
   }
 
   const pageCount = Math.min(pageTexts.length, pageImages.length);
-
-  // Pages are independent, so they process in parallel batches. This
-  // combines with host.json's queue batchSize — total concurrency is the
-  // product of the two, which must stay inside the Azure OpenAI RPM limit.
   const PAGE_BATCH_SIZE = 3;
 
+  /** One unit of content ready to embed, with the page it came from. */
+  interface PendingChunk {
+    page: number; // 1-based, for logging only
+    content: string;
+  }
+
   interface PageOutcome {
-    indexed: boolean;
+    chunks: PendingChunk[];
     captioned: boolean;
     captionSkipped: boolean;
   }
 
-  const processPage = async (i: number): Promise<PageOutcome> => {
+  // Phase 1: caption and assemble content per page, in parallel batches.
+  // Splitting happens here but embedding does NOT — chunk indexes have to
+  // be assigned in document order, which can't be done until every page
+  // is known.
+  const preparePage = async (i: number): Promise<PageOutcome> => {
     const pageText = pageTexts[i];
     const pageImageBase64 = pageImages[i].toString("base64");
 
@@ -169,30 +173,73 @@ async function indexPdfFile(
       );
     }
 
-    const captionText = skip ? "" : `\n\n[Visual content on this page: ${caption}]`;
+    const trimmedText = pageText.trim();
 
-    // A page with neither text nor caption (e.g. a cover image) must
-    // STILL be indexed — getIndexedFileState() identifies files by their
-    // chunkIndex 0 document, so a missing page 0 makes the whole file
-    // invisible to the diff and it re-indexes on every run.
-    const combinedContent =
-      `${pageText}${captionText}`.trim() ||
-      `[Page ${i + 1} of ${job.itemName} — no text content]`;
-
-    const embedding = await generateEmbedding(combinedContent);
-    if (!embedding) {
-      console.warn(`[INDEX-FILE] Failed to embed page ${i + 1} of "${job.itemName}".`);
-      return { indexed: false, captioned: !skip, captionSkipped: skip };
+    // A captioned page is never split: the whole point of page-level
+    // chunking was keeping a step's text together with the caption
+    // describing its screenshot. Splitting would break that pairing.
+    if (!skip) {
+      const combined = `${trimmedText}\n\n[Visual content on this page: ${caption}]`.trim();
+      return {
+        chunks: [{ page: i + 1, content: combined }],
+        captioned: true,
+        captionSkipped: false,
+      };
     }
 
-    const uploaded = await uploadDocument(buildDoc(job, i, combinedContent, embedding));
-    return { indexed: uploaded, captioned: !skip, captionSkipped: skip };
+    // An empty page still needs a placeholder — getIndexedFileState()
+    // finds files by their chunkIndex 0 document, so a file whose first
+    // unit is missing becomes invisible to the diff and re-indexes on
+    // every run.
+    if (trimmedText.length === 0) {
+      return {
+        chunks: [
+          { page: i + 1, content: `[Page ${i + 1} of ${job.itemName} — no text content]` },
+        ],
+        captioned: false,
+        captionSkipped: true,
+      };
+    }
+
+    // Short pages stay whole — splitting them would only fragment
+    // something already focused.
+    if (trimmedText.length <= SPLIT_THRESHOLD_CHARS) {
+      return {
+        chunks: [{ page: i + 1, content: trimmedText }],
+        captioned: false,
+        captionSkipped: true,
+      };
+    }
+
+    // Dense text page: split on paragraph boundaries so a specific
+    // clause carries its own vector instead of being averaged away.
+    const parts = chunkText(trimmedText);
+
+    if (parts.length === 0) {
+      return {
+        chunks: [{ page: i + 1, content: trimmedText }],
+        captioned: false,
+        captionSkipped: true,
+      };
+    }
+
+    if (parts.length > 1) {
+      console.log(
+        `[INDEX-FILE] Page ${i + 1} of "${job.itemName}" split into ${parts.length} chunk(s) (${trimmedText.length} chars).`
+      );
+    }
+
+    return {
+      chunks: parts.map((content) => ({ page: i + 1, content })),
+      captioned: false,
+      captionSkipped: true,
+    };
   };
 
-  let pagesIndexed = 0;
-  let pagesFailed = 0;
+  const pageOutcomes: PageOutcome[] = [];
   let pagesCaptioned = 0;
   let pagesCaptionSkipped = 0;
+  let pagesFailed = 0;
 
   for (let start = 0; start < pageCount; start += PAGE_BATCH_SIZE) {
     const batch: number[] = [];
@@ -200,24 +247,84 @@ async function indexPdfFile(
       batch.push(i);
     }
 
-    // allSettled, not all: one page throwing must not abandon the rest
-    // of the batch — a partially indexed file is still useful.
-    const results = await Promise.allSettled(batch.map(processPage));
+    const results = await Promise.allSettled(batch.map(preparePage));
 
     for (const result of results) {
       if (result.status === "rejected") {
         console.error(
-          `[INDEX-FILE] Page processing threw for "${job.itemName}": ${result.reason}`
+          `[INDEX-FILE] Page preparation threw for "${job.itemName}": ${result.reason}`
         );
         pagesFailed++;
         continue;
       }
 
-      const outcome = result.value;
-      if (outcome.indexed) pagesIndexed++;
+      pageOutcomes.push(result.value);
+      if (result.value.captioned) pagesCaptioned++;
+      if (result.value.captionSkipped) pagesCaptionSkipped++;
+    }
+  }
+
+  // Flatten in document order, assigning sequential chunk indexes.
+  // NOTE: chunkIndex is no longer the page number — it's a sequence
+  // number, since one page can now produce several chunks. Nothing
+  // depends on it being a page number: deleteFileChunks filters on
+  // driveItemId, and getIndexedFileState only needs chunk 0 to exist.
+  const pending: PendingChunk[] = [];
+  for (const outcome of pageOutcomes) {
+    pending.push(...outcome.chunks);
+  }
+
+  if (pending.length === 0) {
+    return {
+      ...EMPTY_RESULT,
+      chunksDeleted,
+      pagesCaptioned,
+      pagesCaptionSkipped,
+      error: "No indexable content produced",
+    };
+  }
+
+  console.log(
+    `[INDEX-FILE] "${job.itemName}": ${pageCount} page(s) produced ${pending.length} chunk(s).`
+  );
+
+  // Phase 2: embed and upload. Vision calls are done, so this is only
+  // embeddings — cheaper per call, so a larger batch is safe.
+  const EMBED_BATCH_SIZE = 5;
+  let pagesIndexed = 0;
+
+  const embedAndUpload = async (chunkIndex: number): Promise<boolean> => {
+    const chunk = pending[chunkIndex];
+
+    const embedding = await generateEmbedding(chunk.content);
+    if (!embedding) {
+      console.warn(
+        `[INDEX-FILE] Failed to embed chunk ${chunkIndex} (page ${chunk.page}) of "${job.itemName}".`
+      );
+      return false;
+    }
+
+    return uploadDocument(buildDoc(job, chunkIndex, chunk.content, embedding));
+  };
+
+  for (let start = 0; start < pending.length; start += EMBED_BATCH_SIZE) {
+    const batch: number[] = [];
+    for (let i = start; i < Math.min(start + EMBED_BATCH_SIZE, pending.length); i++) {
+      batch.push(i);
+    }
+
+    const results = await Promise.allSettled(batch.map(embedAndUpload));
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error(
+          `[INDEX-FILE] Chunk upload threw for "${job.itemName}": ${result.reason}`
+        );
+        pagesFailed++;
+        continue;
+      }
+      if (result.value) pagesIndexed++;
       else pagesFailed++;
-      if (outcome.captioned) pagesCaptioned++;
-      if (outcome.captionSkipped) pagesCaptionSkipped++;
     }
   }
 
@@ -458,4 +565,4 @@ export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResu
     chunksDeleted,
     error: `Unsupported file type: ${job.itemName}`,
   };
-}
+}

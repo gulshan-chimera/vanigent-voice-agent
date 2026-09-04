@@ -49,7 +49,7 @@ export async function queryIndex(
             kind: "vector",
             vector: queryVector,
             fields: ["contentVector"],
-            kNearestNeighborsCount: 3,
+            kNearestNeighborsCount: 5,
           },
         ],
       },
