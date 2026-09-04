@@ -42,17 +42,21 @@ export async function queryIndex(
   }
 
   try {
-    const results = await searchClient.search("*", {
+    // Hybrid search: same approach as knowledgeBaseAnswer.ts — vector
+    // similarity combined with BM25 full-text keyword matching.
+    const results = await searchClient.search(body.query!, {
+      searchFields: ["content", "fileName"],
       vectorSearchOptions: {
         queries: [
           {
             kind: "vector",
             vector: queryVector,
             fields: ["contentVector"],
-            kNearestNeighborsCount: 5,
+            kNearestNeighborsCount: 10,
           },
         ],
       },
+      top: 5,
     });
 
     const matches = [];
