@@ -52,26 +52,44 @@ function buildSupportBody(
   context: CallReportContext,
   callerEmail: string | null
 ): string {
-  const emailLine = callerEmail
-    ? `<p><strong>Caller email:</strong> ${escapeHtml(callerEmail)} (copy sent)</p>`
-    : `<p style="color:#b00;"><strong>Caller email could not be resolved — no copy was sent to the caller.</strong></p>`;
+  const followUp = report.followUpRequired;
+  const caller = report.customerName || context.callerNumber;
+  const durationMin = Math.round(context.durationSeconds / 60);
+  const questions = report.openQuestions || [];
+
+  const banner = followUp
+    ? `<div style="background:#fef3c7;border-left:4px solid #d97706;padding:10px 14px;margin:0 0 18px">
+         <strong>Follow-up required</strong>
+       </div>`
+    : `<div style="background:#ecfdf5;border-left:4px solid #059669;padding:10px 14px;margin:0 0 18px">
+         No follow-up required
+       </div>`;
 
   return `
-<p><strong>Follow-up required from a support call.</strong></p>
-<p><strong>Caller:</strong> ${escapeHtml(report.customerName || "Unknown")}<br>
-<strong>Number:</strong> ${escapeHtml(context.callerNumber)}<br>
-<strong>Urgency:</strong> ${escapeHtml(report.urgency)}<br>
-<strong>Call time:</strong> ${escapeHtml(context.startedAt)}<br>
-<strong>Duration:</strong> ${Math.round(context.durationSeconds)} seconds</p>
-${emailLine}
-<h3>Questions needing follow-up</h3>
-${buildQuestionList(report.openQuestions)}
-<h3>Call summary</h3>
-<p>${escapeHtml(report.summary)}</p>
-<h3>Transcript</h3>
-<pre style="white-space:pre-wrap;font-family:inherit;">${escapeHtml(context.transcript)}</pre>
-<p style="color:#666;font-size:12px;">Call ID: ${escapeHtml(context.callId)}</p>
-`;
+    <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
+      ${banner}
+      <h2 style="margin:0 0 4px">Call summary</h2>
+      <p style="color:#555;margin:0 0 16px">
+        ${escapeHtml(caller)}
+        ${callerEmail ? ` &middot; ${escapeHtml(callerEmail)}` : ""}
+        ${durationMin !== null ? ` &middot; ${durationMin} min` : ""}
+      </p>
+
+      <p style="line-height:1.5">${escapeHtml(report.summary)}</p>
+
+      ${
+        followUp && questions.length
+          ? `<h3 style="margin:20px 0 6px">Open questions</h3>
+             <ul style="line-height:1.6">
+               ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
+             </ul>`
+          : ""
+      }
+
+      <p style="margin-top:24px;font-size:13px;color:#777">
+        Call ID: ${escapeHtml(context.callId || "n/a")}
+      </p>
+    </div>`;
 }
 
 function buildCallerBody(report: FollowUpReport, context: CallReportContext): string {
