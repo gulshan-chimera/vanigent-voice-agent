@@ -4,7 +4,8 @@
 // the call left questions unanswered.
 //
 // The structured output lives at:
-//   message.analysis.structuredOutputs[<uuid>].result
+//   message.artifact.structuredOutputs[<uuid>].result
+// We also check message.analysis.structuredOutputs as a legacy fallback.
 // We iterate the values rather than hardcoding the UUID, since that ID
 // changes if the structured output is recreated in the VAPI dashboard.
 //
@@ -27,6 +28,9 @@ interface EndOfCallReportBody {
     startedAt?: string;
     durationSeconds?: number;
     transcript?: string;
+    artifact?: {
+      structuredOutputs?: Record<string, StructuredOutputEntry>;
+    };
     analysis?: {
       summary?: string;
       structuredOutputs?: Record<string, StructuredOutputEntry>;
@@ -107,12 +111,22 @@ export async function vapiCallReport(
 
   const message = body?.message;
 
-  if (message?.type !== "end-of-call-report") {
+  if (message?.type !== "end-of-call-report" && message?.type !== "call.analysis.completed") {
     context.log(`[CALL-REPORT] Ignoring event type: ${message?.type ?? "(none)"}`);
     return { status: 200 };
   }
 
-  const report = extractReport(message.analysis?.structuredOutputs);
+  context.log(`[CALL-REPORT] Processing event: ${message.type}`);
+
+  // VAPI puts structured outputs under artifact (current) or analysis (legacy)
+  const structuredOutputs =
+    message.artifact?.structuredOutputs ?? message.analysis?.structuredOutputs;
+
+  context.log(
+    `[CALL-REPORT] structuredOutputs keys: ${structuredOutputs ? Object.keys(structuredOutputs).join(", ") : "(none)"}`
+  );
+
+  const report = extractReport(structuredOutputs);
 
   if (!report) {
     context.warn(
