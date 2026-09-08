@@ -3,8 +3,7 @@
 // to an employee in Microsoft Entra ID by querying the Graph /users endpoint.
 
 import { getGraphAccessToken } from "./graphAuth";
-import { CallerLookupResult, EntraUser } from "../types/vapi";
-
+import { EntraUser, CallerLookupResult, EntraManager } from "../types/vapi";
 /**
  * Builds a set of plausible phone number variants to check against Entra ID,
  * since numbers may be stored in different formats by different admins
@@ -60,6 +59,58 @@ export function buildPhoneVariants(rawNumber: string): string[] {
 }
 
 /**
+ * Fetches the caller's manager as a separate Graph request.
+ * Graph doesn't support $expand alongside advanced-query phone filters,
+ * so a second call is required. Returns null on 404 (no manager assigned)
+ * or any error — the caller's authentication decision is never affected.
+ */
+async function fetchManager(
+  userId: string,
+  token: string
+): Promise<EntraManager | null> {
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(userId)}/manager?$select=id,displayName,mail,jobTitle,userPrincipalName,department`;
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ConsistencyLevel: "eventual",
+      },
+    });
+
+    // 404 is the normal answer for "no manager assigned" — not an error.
+    if (response.status === 404) {
+      console.log("[CALLER-LOOKUP] No manager assigned to this user.");
+      return null;
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn(
+        `[CALLER-LOOKUP] Manager fetch failed (${response.status}): ${errorText} — continuing without manager.`
+      );
+      return null;
+    }
+
+    const data = (await response.json()) as EntraManager & { "@odata.type"?: string };
+
+    return {
+      id: data.id,
+      displayName: data.displayName,
+      mail: data.mail ?? null,
+      jobTitle: data.jobTitle ?? null,
+      userPrincipalName: data.userPrincipalName ?? null,
+      department: data.department ?? null,
+    };
+  } catch (error) {
+    console.warn(
+      `[CALLER-LOOKUP] Manager fetch network error: ${(error as Error).message} — continuing without manager.`
+    );
+    return null;
+  }
+}
+/**
  * Escapes single quotes in a string for safe use inside an OData filter.
  */
 export function escapeODataValue(value: string): string {
@@ -67,8 +118,7 @@ export function escapeODataValue(value: string): string {
 }
 
 export async function lookupCaller(rawNumber: string): Promise<CallerLookupResult> {
-  const notAuthenticated: CallerLookupResult = { isAuthenticated: false, user: null };
-
+  const notAuthenticated: CallerLookupResult = { isAuthenticated: false, user: null, manager: null };
   if (!rawNumber) {
     console.warn("[CALLER-LOOKUP] No phone number provided — failing closed.");
     return notAuthenticated;
@@ -128,10 +178,15 @@ export async function lookupCaller(rawNumber: string): Promise<CallerLookupResul
 
     const matchedUser = data.value[0];
     console.log(
-      `[CALLER-LOOKUP] Match found for ${rawNumber}: ${matchedUser.displayName} (${matchedUser.id}) (${matchedUser.mail})`
+      `[CALLER-LOOKUP] Match found for ${rawNumber}: ${matchedUser.displayName} (${matchedUser.id})`
     );
 
-    return { isAuthenticated: true, user: matchedUser };
+    // Fetch manager as a separate call — Graph can't $expand this
+    // alongside the advanced-query phone filter.
+    // A failed manager lookup never blocks authentication.
+    const manager = await fetchManager(matchedUser.id, token);
+
+    return { isAuthenticated: true, user: matchedUser, manager };
   } catch (error) {
     console.error(
       `[CALLER-LOOKUP] Network error during Graph query: ${(error as Error).message}`
@@ -140,7 +195,7 @@ export async function lookupCaller(rawNumber: string): Promise<CallerLookupResul
   }
 }
 
-export function formatUserDetails(user: EntraUser): string {
+export function formatUserDetails(user: EntraUser, manager: EntraManager | null): string {
   const fields: [string, string | undefined][] = [
     ["Job title", user.jobTitle ?? undefined],
     ["Department", user.department ?? undefined],
@@ -162,8 +217,20 @@ export function formatUserDetails(user: EntraUser): string {
   ];
 
   const lines = [`Caller name: ${user.displayName}`];
+
   for (const [label, value] of fields) {
     if (value) lines.push(`${label}: ${value}`);
+  }
+
+  // Manager details — only included when a manager is assigned.
+  // A missing manager is normal and expected for some accounts.
+  if (manager) {
+    lines.push("--- Manager ---");
+    if (manager.displayName) lines.push(`Manager name: ${manager.displayName}`);
+    if (manager.mail) lines.push(`Manager email: ${manager.mail}`);
+    if (manager.userPrincipalName && manager.userPrincipalName !== manager.mail) {
+      lines.push(`Manager UPN: ${manager.userPrincipalName}`);
+    }
   }
 
   return lines.join("\n");

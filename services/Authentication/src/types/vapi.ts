@@ -23,12 +23,20 @@ export interface EntraUser {
   accountEnabled?: boolean;
 }
 
+export interface EntraManager {
+  id: string;
+  displayName: string;
+  mail?: string | null;
+  jobTitle?: string | null;
+  userPrincipalName?: string | null;
+  department?: string | null;
+}
 
 export interface CallerLookupResult {
   isAuthenticated: boolean;
   user: EntraUser | null;
+  manager: EntraManager | null;
 }
-
 // --- VAPI webhook payload shapes (tool-calls event) ---
 
 export interface VapiCustomer {
