@@ -50,7 +50,7 @@ export async function vapiWebhook(
 
   const result = callerNumber
     ? await lookupCaller(callerNumber)
-    : { isAuthenticated: false, user: null };
+    : { isAuthenticated: false, user: null, manager: null };
 
   if (!callerNumber) {
     context.warn("[VAPI-WEBHOOK] No caller number in payload — failing closed.");
@@ -64,7 +64,7 @@ export async function vapiWebhook(
 
   const resultText =
     result.isAuthenticated && result.user
-      ? `AUTHORIZED.\n${formatUserDetails(result.user)}`
+      ? `AUTHORIZED.\n${formatUserDetails(result.user, result.manager,)}`
       : "UNAUTHORIZED. This caller is not a recognized employee.";
 
 
