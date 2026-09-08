@@ -29,30 +29,67 @@ const SELECT_FIELDS = [
   "preferredLanguage",
   "accountEnabled",
 ].join(",");
+
 export function buildPhoneVariants(rawNumber: string): string[] {
   const variants = new Set<string>();
 
-  // Original, as received
+  // Always include the raw number as received from VAPI.
   variants.add(rawNumber);
 
-  // Strip all non-digit characters except leading +
+  // Strip everything except digits and leading +.
   const digitsOnly = rawNumber.replace(/[^\d+]/g, "");
   variants.add(digitsOnly);
 
-  // Without leading +
+  // With and without leading +.
   if (digitsOnly.startsWith("+")) {
     variants.add(digitsOnly.slice(1));
   } else {
     variants.add(`+${digitsOnly}`);
   }
 
-  // Without country code, assuming India (+91) or similar 2-digit code,
-  // keeping the last 10 digits — common local storage format
+  // Last 10 digits — the local number without any country code.
   const last10 = digitsOnly.replace(/\D/g, "").slice(-10);
+
   if (last10.length === 10) {
-    variants.add(last10);
-    variants.add(`+91${last10}`);
-    variants.add(`91${last10}`);
+    const area = last10.slice(0, 3);
+    const mid = last10.slice(3, 6);
+    const end = last10.slice(6);
+
+    // ── Plain digit strings ──────────────────────────────────────────
+    variants.add(last10);                              // 7188410861
+    variants.add(`1${last10}`);                        // 17188410861
+    variants.add(`+1${last10}`);                       // +17188410861
+
+    // ── Dashed ───────────────────────────────────────────────────────
+    variants.add(`${area}-${mid}-${end}`);             // 718-841-0861
+    variants.add(`1-${area}-${mid}-${end}`);           // 1-718-841-0861
+    variants.add(`+1-${area}-${mid}-${end}`);          // +1-718-841-0861
+
+    // ── Parenthesised area code ───────────────────────────────────────
+    variants.add(`(${area}) ${mid}-${end}`);           // (718) 841-0861
+    variants.add(`(${area})${mid}-${end}`);            // (718)841-0861
+    variants.add(`(${area}) ${mid} ${end}`);           // (718) 841 0861
+    variants.add(`1 (${area}) ${mid}-${end}`);         // 1 (718) 841-0861
+    variants.add(`+1 (${area}) ${mid}-${end}`);        // +1 (718) 841-0861
+    variants.add(`+1(${area})${mid}-${end}`);          // +1(718)841-0861
+    variants.add(`+1(${area}) ${mid}-${end}`);         // +1(718) 841-0861
+    variants.add(`+1 (${area}) ${mid} ${end}`)
+    variants.add(`+1(${area})${mid}${end}`)
+
+    // ── Dot-separated ────────────────────────────────────────────────
+    variants.add(`${area}.${mid}.${end}`);             // 718.841.0861
+    variants.add(`1.${area}.${mid}.${end}`);           // 1.718.841.0861
+    variants.add(`+1.${area}.${mid}.${end}`);          // +1.718.841.0861
+
+    // ── Space-separated ──────────────────────────────────────────────
+    variants.add(`${area} ${mid} ${end}`);             // 718 841 0861
+    variants.add(`1 ${area} ${mid} ${end}`);           // 1 718 841 0861
+    variants.add(`+1 ${area} ${mid} ${end}`);          // +1 718 841 0861
+    variants.add(`+1 ${area}-${mid}-${end}`);          // +1 718-841-0861
+
+    // ── Mixed formats seen in legacy HR imports ───────────────────────
+    variants.add(`${area}-${mid}-${end} x`);          // sometimes extensions added
+    variants.add(`+1${area}${mid}${end}`);             // +17188410861 (no space after +1)
   }
 
   return Array.from(variants).filter((v) => v.length > 0);
