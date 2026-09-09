@@ -47,65 +47,52 @@ function buildQuestionList(questions: string[]): string {
   return `<ul>\n${items}\n</ul>`;
 }
 
-function buildSupportBody(
+function buildEmailBody(
   report: FollowUpReport,
   context: CallReportContext,
-  callerEmail: string | null
+  callerEmail: string | null,
+  supportEmail: string
 ): string {
-  const followUp = report.followUpRequired;
   const caller = report.customerName || context.callerNumber;
   const durationMin = Math.round(context.durationSeconds / 60);
   const questions = report.openQuestions || [];
+  const hasQuestions = questions.length > 0;
 
-  const banner = followUp
-    ? `<div style="background:#fef3c7;border-left:4px solid #d97706;padding:10px 14px;margin:0 0 18px">
-         <strong>Follow-up required</strong>
-       </div>`
-    : `<div style="background:#ecfdf5;border-left:4px solid #059669;padding:10px 14px;margin:0 0 18px">
-         No follow-up required
-       </div>`;
+  const introText = hasQuestions
+    ? `Thanks for calling the Vanigent Support Team. Please find below the call summary and the follow-up questions identified during the call.`
+    : `Thanks for calling the Vanigent Support Team. Please find below the call summary.`;
+
+  const supportTag = hasQuestions
+    ? `<p><a href="mailto:${escapeHtml(supportEmail)}">@support_team</a>, please review the open questions below and try to resolve them.</p>`
+    : "";
+
+  const questionsHeader = questions.length > 1 ? "Open questions" : "Open question";
+
+  const questionsSection = hasQuestions
+    ? `<h3 style="margin:20px 0 6px">${questionsHeader}</h3>
+       <ul style="line-height:1.6">
+         ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
+       </ul>`
+    : "";
 
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
-      ${banner}
+      <p>Hi ${escapeHtml(caller)},</p>
+      <p>${introText}</p>
+      ${supportTag}
+      
       <h2 style="margin:0 0 4px">Call summary</h2>
       <p style="color:#555;margin:0 0 16px">
         ${escapeHtml(caller)}
         ${callerEmail ? ` &middot; ${escapeHtml(callerEmail)}` : ""}
         ${durationMin !== null ? ` &middot; ${durationMin} min` : ""}
+        &middot; Call ID: ${escapeHtml(context.callId || "n/a")}
       </p>
 
       <p style="line-height:1.5">${escapeHtml(report.summary)}</p>
 
-      ${
-        followUp && questions.length
-          ? `<h3 style="margin:20px 0 6px">Open questions</h3>
-             <ul style="line-height:1.6">
-               ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
-             </ul>`
-          : ""
-      }
-
-      <p style="margin-top:24px;font-size:13px;color:#777">
-        Call ID: ${escapeHtml(context.callId || "n/a")}
-      </p>
+      ${questionsSection}
     </div>`;
-}
-
-function buildCallerBody(report: FollowUpReport, context: CallReportContext): string {
-  const firstName = (report.customerName || "").split(" ")[0] || "there";
-
-  return `
-<p>Hi ${escapeHtml(firstName)},</p>
-<p>Thanks for calling employee support. There were a few things we couldn't
-answer on the call, so we've passed them to the team to follow up with you.</p>
-<h3>What we're following up on</h3>
-${buildQuestionList(report.openQuestions)}
-<h3>Summary of your call</h3>
-<p>${escapeHtml(report.summary)}</p>
-<p>Someone will be in touch. No action needed from you in the meantime.</p>
-<p style="color:#666;font-size:12px;">Call reference: ${escapeHtml(context.callId)}</p>
-`;
 }
 
 export async function sendFollowUpReport(
@@ -142,21 +129,18 @@ export async function sendFollowUpReport(
   }
 
   const subjectSuffix = report.customerName ? ` — ${report.customerName}` : "";
+  const subject = `Support call follow-up${subjectSuffix}`;
 
-  const supportSent = await sendMail({
-    to: [supportEmail],
-    subject: `Support call follow-up (${report.urgency})${subjectSuffix}`,
-    htmlBody: buildSupportBody(report, context, callerEmail),
-  });
-
-  let callerSent = false;
+  const toRecipients = [supportEmail];
   if (callerEmail) {
-    callerSent = await sendMail({
-      to: [callerEmail],
-      subject: "Following up on your support call",
-      htmlBody: buildCallerBody(report, context),
-    });
+    toRecipients.push(callerEmail);
   }
 
-  return { supportSent, callerSent, callerEmail };
+  const sent = await sendMail({
+    to: toRecipients,
+    subject: subject,
+    htmlBody: buildEmailBody(report, context, callerEmail, supportEmail),
+  });
+
+  return { supportSent: sent, callerSent: sent && !!callerEmail, callerEmail };
 }

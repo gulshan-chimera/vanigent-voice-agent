@@ -135,12 +135,7 @@ export async function vapiCallReport(
     return { status: 200 };
   }
 
-  if (!report.followUpRequired) {
-    context.log(
-      `[CALL-REPORT] followUpRequired is false — no email sent. Open questions: ${report.openQuestions.length}`
-    );
-    return { status: 200 };
-  }
+
 
   const callerNumber =
     message.call?.customer?.number ?? message.customer?.number ?? "";
