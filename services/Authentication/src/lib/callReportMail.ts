@@ -66,7 +66,13 @@ function buildEmailBody(
     ? `<p><a href="mailto:${escapeHtml(supportEmail)}">@support_team</a>, please review the open questions below and try to resolve them.</p>`
     : "";
 
-  const questionsHeader = questions.length > 1 ? "Open questions" : "Open question";
+  const urgencyLabel = report.urgency
+    ? report.urgency.charAt(0).toUpperCase() + report.urgency.slice(1)
+    : "Unknown";
+
+  const questionsHeader = questions.length > 1 
+    ? `Open questions, Priority: ${escapeHtml(urgencyLabel)}` 
+    : `Open question, Priority: ${escapeHtml(urgencyLabel)}`;
 
   const questionsSection = hasQuestions
     ? `<h3 style="margin:20px 0 6px">${questionsHeader}</h3>
