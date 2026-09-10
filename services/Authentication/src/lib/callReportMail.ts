@@ -116,9 +116,11 @@ export async function sendFollowUpReport(
   // (a real mailbox) over userPrincipalName (a sign-in identifier that
   // may not route mail).
   let callerEmail: string | null = null;
+  let isAuthenticated = false;
 
   try {
     const lookup = await lookupCaller(context.callerNumber);
+    isAuthenticated = lookup.isAuthenticated;
     if (lookup.isAuthenticated && lookup.user) {
       callerEmail = lookup.user.mail ?? lookup.user.userPrincipalName ?? null;
     }
@@ -128,9 +130,16 @@ export async function sendFollowUpReport(
     );
   }
 
+  if (!isAuthenticated) {
+    console.log(
+      `[CALL-REPORT-MAIL] Caller ${context.callerNumber} is not authenticated in Entra ID. Skipping follow-up email.`
+    );
+    return { supportSent: false, callerSent: false, callerEmail: null };
+  }
+
   if (!callerEmail) {
     console.warn(
-      `[CALL-REPORT-MAIL] No mailbox found for ${context.callerNumber} — support only.`
+      `[CALL-REPORT-MAIL] No mailbox found for authenticated user ${context.callerNumber} — support only.`
     );
   }
 
