@@ -37,6 +37,13 @@ export async function indexFile(
 
   const result = await indexOneFile(job);
 
+    if (result.skipped) {
+    context.log(
+      `[INDEX-FILE] Skipped "${job.itemName}": ${result.error ?? "no indexable content"}`
+    );
+    return;
+  }
+
   if (!result.ok) {
     // Throw so the runtime retries, then poison-queues if it keeps failing.
     throw new Error(
