@@ -10,6 +10,7 @@
 
 import { lookupCaller } from "./callerLookup";
 import { sendMail } from "./graphMail";
+import { getGraphAccessToken } from "./graphAuth";
 
 export interface FollowUpReport {
   summary: string;
@@ -52,7 +53,8 @@ function buildEmailBody(
   context: CallReportContext,
   callerEmail: string | null,
   supportEmail: string,
-  callerDisplayName: string
+  callerDisplayName: string,
+  senderDisplayName: string
 ): string {
   const caller = callerDisplayName;
   const durationMin = Math.round(context.durationSeconds / 60);
@@ -82,8 +84,6 @@ function buildEmailBody(
        </ul>`
     : "";
 
-  const supportAssistantName = process.env.SUPPORT_ASSISTANT_NAME || "Vanigent Support Team";
-
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
       <p>Hi ${escapeHtml(caller)},</p>
@@ -103,7 +103,7 @@ function buildEmailBody(
       ${questionsSection}
 
       <p style="margin-top:30px">Best Regards,</p>
-      <p><strong>${escapeHtml(supportAssistantName)}</strong></p>
+      <p><strong>${escapeHtml(senderDisplayName)}</strong></p>
     </div>`;
 }
 
@@ -161,10 +161,33 @@ export async function sendFollowUpReport(
     toRecipients.push(callerEmail);
   }
 
+  // Fetch the display name of the sender mailbox (CALL_REPORT_SENDER_UPN)
+  // to use in the "Best Regards" sign-off.
+  const senderUpn = process.env.CALL_REPORT_SENDER_UPN || "";
+  let senderDisplayName = "Vanigent Support Team";
+
+  if (senderUpn) {
+    try {
+      const graphToken = await getGraphAccessToken();
+      if (graphToken) {
+        const res = await fetch(
+          `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderUpn)}?$select=displayName`,
+          { headers: { Authorization: `Bearer ${graphToken}` } }
+        );
+        if (res.ok) {
+          const data = (await res.json()) as { displayName?: string };
+          if (data.displayName) senderDisplayName = data.displayName;
+        }
+      }
+    } catch {
+      // Fall back to the default name if the lookup fails.
+    }
+  }
+
   const sent = await sendMail({
     to: toRecipients,
     subject: subject,
-    htmlBody: buildEmailBody(report, context, callerEmail, supportEmail, callerDisplayName),
+    htmlBody: buildEmailBody(report, context, callerEmail, supportEmail, callerDisplayName, senderDisplayName),
   });
 
   return { supportSent: sent, callerSent: sent && !!callerEmail, callerEmail };
