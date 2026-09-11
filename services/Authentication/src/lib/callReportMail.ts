@@ -51,9 +51,10 @@ function buildEmailBody(
   report: FollowUpReport,
   context: CallReportContext,
   callerEmail: string | null,
-  supportEmail: string
+  supportEmail: string,
+  callerDisplayName: string
 ): string {
-  const caller = report.customerName || context.callerNumber;
+  const caller = callerDisplayName;
   const durationMin = Math.round(context.durationSeconds / 60);
   const questions = report.openQuestions || [];
   const hasQuestions = questions.length > 0;
@@ -81,6 +82,8 @@ function buildEmailBody(
        </ul>`
     : "";
 
+  const supportAssistantName = process.env.SUPPORT_ASSISTANT_NAME || "Vanigent Support Team";
+
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
       <p>Hi ${escapeHtml(caller)},</p>
@@ -98,6 +101,9 @@ function buildEmailBody(
       <p style="line-height:1.5">${escapeHtml(report.summary)}</p>
 
       ${questionsSection}
+
+      <p style="margin-top:30px">Best Regards,</p>
+      <p><strong>${escapeHtml(supportAssistantName)}</strong></p>
     </div>`;
 }
 
@@ -116,6 +122,7 @@ export async function sendFollowUpReport(
   // (a real mailbox) over userPrincipalName (a sign-in identifier that
   // may not route mail).
   let callerEmail: string | null = null;
+  let callerDisplayName: string = report.customerName || "";
   let isAuthenticated = false;
 
   try {
@@ -123,6 +130,9 @@ export async function sendFollowUpReport(
     isAuthenticated = lookup.isAuthenticated;
     if (lookup.isAuthenticated && lookup.user) {
       callerEmail = lookup.user.mail ?? lookup.user.userPrincipalName ?? null;
+      // Always use the full display name from Entra ID instead of the
+      // AI-extracted customerName, which can be inconsistent.
+      callerDisplayName = lookup.user.displayName ?? callerDisplayName;
     }
   } catch (error) {
     console.warn(
@@ -143,7 +153,7 @@ export async function sendFollowUpReport(
     );
   }
 
-  const subjectSuffix = report.customerName ? ` — ${report.customerName}` : "";
+  const subjectSuffix = callerDisplayName ? ` \u2014 ${callerDisplayName}` : "";
   const subject = `Support call follow-up${subjectSuffix}`;
 
   const toRecipients = [supportEmail];
@@ -154,7 +164,7 @@ export async function sendFollowUpReport(
   const sent = await sendMail({
     to: toRecipients,
     subject: subject,
-    htmlBody: buildEmailBody(report, context, callerEmail, supportEmail),
+    htmlBody: buildEmailBody(report, context, callerEmail, supportEmail, callerDisplayName),
   });
 
   return { supportSent: sent, callerSent: sent && !!callerEmail, callerEmail };
