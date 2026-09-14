@@ -5,7 +5,7 @@ import { renderPdfPagesAsImages } from "./pdfImages";
 import { extractDocxText } from "./docxText";
 import { extractPptxSlideTexts } from "./pptxText";
 import { chunkText } from "./textChunker";
-import { extractPlainText } from "./txtText";
+import { extractPlainText } from "./plainText";
 import {
   generateEmbedding,
   generateImageCaption,
