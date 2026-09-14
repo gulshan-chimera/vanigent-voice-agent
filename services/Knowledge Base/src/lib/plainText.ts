@@ -9,7 +9,7 @@
 // visibly, but a stray BOM character at the start of the first chunk
 // would end up in the embedded text.
 
-export function extractTxtText(base64Content: string): string | null {
+export function extractPlainText(base64Content: string): string | null {
   try {
     const buffer = Buffer.from(base64Content, "base64");
 

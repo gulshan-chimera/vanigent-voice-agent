@@ -5,7 +5,7 @@ import { renderPdfPagesAsImages } from "./pdfImages";
 import { extractDocxText } from "./docxText";
 import { extractPptxSlideTexts } from "./pptxText";
 import { chunkText } from "./textChunker";
-import { extractTxtText } from "./txtText";
+import { extractPlainText } from "./plainText";
 import {
   generateEmbedding,
   generateImageCaption,
@@ -386,7 +386,7 @@ async function indexPlainTextFile(
   base64Content: string,
   chunksDeleted: number
 ): Promise<IndexFileResult> {
-  const text = extractTxtText(base64Content);
+  const text = extractPlainText(base64Content);
 
   if (!text) {
     return { ...EMPTY_RESULT, chunksDeleted, error: "No text extracted from TXT" };
