@@ -5,6 +5,7 @@ import { renderPdfPagesAsImages } from "./pdfImages";
 import { extractDocxText } from "./docxText";
 import { extractPptxSlideTexts } from "./pptxText";
 import { chunkText } from "./textChunker";
+import { extractTxtText } from "./txtText";
 import {
   generateEmbedding,
   generateImageCaption,
@@ -377,6 +378,73 @@ async function indexDocxFile(
 }
 
 // ---------------------------------------------------------------------
+// Plain text path — paragraph-based, no captioning
+// ---------------------------------------------------------------------
+
+async function indexPlainTextFile(
+  job: IndexFileMessage,
+  base64Content: string,
+  chunksDeleted: number
+): Promise<IndexFileResult> {
+  const text = extractTxtText(base64Content);
+
+  if (!text) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "No text extracted from TXT" };
+  }
+
+  const chunks = chunkText(text);
+
+  if (chunks.length === 0) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "Text produced zero chunks" };
+  }
+
+  console.log(`[INDEX-FILE] Split "${job.itemName}" into ${chunks.length} chunk(s).`);
+
+  const CHUNK_BATCH_SIZE = 5;
+  let pagesIndexed = 0;
+  let pagesFailed = 0;
+
+  const processChunk = async (i: number): Promise<boolean> => {
+    const embedding = await generateEmbedding(chunks[i]);
+    if (!embedding) {
+      console.warn(`[INDEX-FILE] Failed to embed chunk ${i + 1} of "${job.itemName}".`);
+      return false;
+    }
+    return uploadDocument(buildDoc(job, i, chunks[i], embedding));
+  };
+
+  for (let start = 0; start < chunks.length; start += CHUNK_BATCH_SIZE) {
+    const batch: number[] = [];
+    for (let i = start; i < Math.min(start + CHUNK_BATCH_SIZE, chunks.length); i++) {
+      batch.push(i);
+    }
+
+    const results = await Promise.allSettled(batch.map(processChunk));
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error(
+          `[INDEX-FILE] Chunk processing threw for "${job.itemName}": ${result.reason}`
+        );
+        pagesFailed++;
+        continue;
+      }
+      if (result.value) pagesIndexed++;
+      else pagesFailed++;
+    }
+  }
+
+  return {
+    ok: pagesIndexed > 0,
+    pagesIndexed,
+    pagesFailed,
+    pagesCaptioned: 0,
+    pagesCaptionSkipped: 0,
+    chunksDeleted,
+  };
+}
+
+// ---------------------------------------------------------------------
 // Spreadsheet path — one chunk per logical row, via LLM structure
 // inference
 // ---------------------------------------------------------------------
@@ -652,8 +720,6 @@ async function indexImageFile(
 // Router
 // ---------------------------------------------------------------------
 
-
-
 /** Signature every format handler shares. */
 type FileHandler = (
   job: IndexFileMessage,
@@ -670,6 +736,8 @@ const FILE_HANDLERS: Record<string, FileHandler> = {
   ".pdf": indexPdfFile,
   ".docx": indexDocxFile,
   ".pptx": indexPptxFile,
+  ".txt": indexPlainTextFile,
+  ".md": indexPlainTextFile,
   // SheetJS reads all three spreadsheet formats through the same API.
   ".xlsx": indexXlsxFile,
   ".xls": indexXlsxFile,
