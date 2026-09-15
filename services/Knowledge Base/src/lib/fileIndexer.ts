@@ -1,45 +1,3 @@
-// src/lib/fileIndexer.ts
-//
-// Indexes ONE file. Dispatches on file type:
-//
-//   PDF  — has fixed pages, so one page = one chunk, and each page can
-//          be rendered to an image and captioned by the vision model.
-//          This keeps a step's text together with its own screenshot.
-//
-//   DOCX — extracted directly from the .docx XML via mammoth
-//          (docxText.ts), chunked by paragraph (textChunker.ts), no
-//          vision captioning. This is a direct reversion from routing
-//          DOCX through Graph's PDF conversion + the PDF pipeline:
-//          mammoth reads structured paragraph/table XML straight from
-//          the document, so a table row's cells stay in document order;
-//          pdfjs's text extraction from the Word→PDF-converted render
-//          instead reconstructs order from on-page text positions, which
-//          scrambled multi-column table rows badly enough that answers
-//          about specific table entries were unreliable. Losing vision
-//          captioning for DOCX is the trade-off for getting table
-//          content back to something the model can actually read.
-//
-//   PPTX — extracted directly from the .pptx XML (pptxText.ts), one
-//          chunk per SLIDE (an author-defined boundary, the same role a
-//          PDF page plays), no vision captioning. Same rationale as
-//          DOCX: this used to go through Graph's PDF conversion for a
-//          uniform pipeline with PDF, but pdfjs's text extraction from
-//          the converted PDF reconstructs reading order from on-page
-//          position, which scrambled multi-column slide layouts (a step
-//          list beside a screenshot) badly enough that some content
-//          became unretrievable. Reading the slide XML directly avoids
-//          that, at the cost of no captioning for now.
-//
-//   IMAGE (.png/.jpg/.jpeg) — a standalone image IS the entire document;
-//          there's no text layer to extract at all, so this is the one
-//          format where vision is the ONLY source of content rather
-//          than a supplement to it. Uses generateImageTranscription, a
-//          dedicated prompt from generateImageCaption's — that one is
-//          tuned to skip content already covered by separately
-//          extracted text and is heavily biased toward returning
-//          nothing, which would be wrong here. One chunk for the whole
-//          file (no page/slide concept for a single image).
-
 import { downloadDriveFile } from "./sharepointFiles";
 import { deleteFileChunks, uploadDocument, KbDocument } from "./searchIndex";
 import { extractPageTexts } from "./pdfPageText";
@@ -47,13 +5,16 @@ import { renderPdfPagesAsImages } from "./pdfImages";
 import { extractDocxText } from "./docxText";
 import { extractPptxSlideTexts } from "./pptxText";
 import { chunkText } from "./textChunker";
+import { extractPlainText } from "./plainText";
 import {
   generateEmbedding,
   generateImageCaption,
   generateImageTranscription,
   SKIP_CAPTION,
+  generateSheetRecords,
 } from "./azureOpenAI";
 import { IndexFileMessage } from "./indexQueue";
+import { extractWorkbookGrid } from "./xlsxGrid";
 
 export interface IndexFileResult {
   ok: boolean;
@@ -62,6 +23,13 @@ export interface IndexFileResult {
   pagesCaptioned: number;
   pagesCaptionSkipped: number;
   chunksDeleted: number;
+  /**
+   * True when the file was deliberately not indexed because it has no
+   * searchable content — a logo, a decorative graphic. This is a correct
+   * outcome, not a failure: the worker must NOT retry or poison-queue it,
+   * or the health endpoint fills up with logos and stops being useful.
+   */
+  skipped?: boolean;
   error?: string;
 }
 
@@ -410,6 +378,204 @@ async function indexDocxFile(
 }
 
 // ---------------------------------------------------------------------
+// Plain text path — paragraph-based, no captioning
+// ---------------------------------------------------------------------
+
+async function indexPlainTextFile(
+  job: IndexFileMessage,
+  base64Content: string,
+  chunksDeleted: number
+): Promise<IndexFileResult> {
+  const text = extractPlainText(base64Content);
+
+  if (!text) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "No text extracted from TXT" };
+  }
+
+  const chunks = chunkText(text);
+
+  if (chunks.length === 0) {
+    return { ...EMPTY_RESULT, chunksDeleted, error: "Text produced zero chunks" };
+  }
+
+  console.log(`[INDEX-FILE] Split "${job.itemName}" into ${chunks.length} chunk(s).`);
+
+  const CHUNK_BATCH_SIZE = 5;
+  let pagesIndexed = 0;
+  let pagesFailed = 0;
+
+  const processChunk = async (i: number): Promise<boolean> => {
+    const embedding = await generateEmbedding(chunks[i]);
+    if (!embedding) {
+      console.warn(`[INDEX-FILE] Failed to embed chunk ${i + 1} of "${job.itemName}".`);
+      return false;
+    }
+    return uploadDocument(buildDoc(job, i, chunks[i], embedding));
+  };
+
+  for (let start = 0; start < chunks.length; start += CHUNK_BATCH_SIZE) {
+    const batch: number[] = [];
+    for (let i = start; i < Math.min(start + CHUNK_BATCH_SIZE, chunks.length); i++) {
+      batch.push(i);
+    }
+
+    const results = await Promise.allSettled(batch.map(processChunk));
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error(
+          `[INDEX-FILE] Chunk processing threw for "${job.itemName}": ${result.reason}`
+        );
+        pagesFailed++;
+        continue;
+      }
+      if (result.value) pagesIndexed++;
+      else pagesFailed++;
+    }
+  }
+
+  return {
+    ok: pagesIndexed > 0,
+    pagesIndexed,
+    pagesFailed,
+    pagesCaptioned: 0,
+    pagesCaptionSkipped: 0,
+    chunksDeleted,
+  };
+}
+
+// ---------------------------------------------------------------------
+// Spreadsheet path — one chunk per logical row, via LLM structure
+// inference
+// ---------------------------------------------------------------------
+
+async function indexXlsxFile(
+  job: IndexFileMessage,
+  base64Content: string,
+  chunksDeleted: number
+): Promise<IndexFileResult> {
+  const grid = extractWorkbookGrid(base64Content);
+
+  if (!grid) {
+    return {
+      ...EMPTY_RESULT,
+      chunksDeleted,
+      error: "No usable sheets found in workbook",
+    };
+  }
+
+  if (grid.skipped.length > 0) {
+    console.log(
+      `[INDEX-FILE] "${job.itemName}": skipped ${grid.skipped.length} sheet(s) — ${grid.skipped
+        .map((s) => `${s.sheetName} (${s.reason})`)
+        .join(", ")}`
+    );
+  }
+
+  // Generate records sheet by sheet. One model call per sheet rather than
+  // per workbook: a large workbook wouldn't fit in a single prompt, and
+  // isolating the calls means one malformed sheet doesn't lose the rest.
+  const allRecords: { sheetName: string; title: string; content: string }[] = [];
+
+  for (const sheet of grid.sheets) {
+    const records = await generateSheetRecords(
+      job.itemName,
+      sheet.sheetName,
+      sheet.cellLines,
+      sheet.mergedRanges
+    );
+
+    if (!records) {
+      console.warn(
+        `[INDEX-FILE] Sheet "${sheet.sheetName}" of "${job.itemName}" produced no records — skipping that sheet.`
+      );
+      continue;
+    }
+
+    if (sheet.truncated) {
+      console.warn(
+        `[INDEX-FILE] Sheet "${sheet.sheetName}" was truncated — records cover only the first rows.`
+      );
+    }
+
+    for (const record of records) {
+      allRecords.push({
+        sheetName: sheet.sheetName,
+        title: record.title,
+        content: record.content,
+      });
+    }
+  }
+
+  if (allRecords.length === 0) {
+    return {
+      ...EMPTY_RESULT,
+      chunksDeleted,
+      error: "No records generated from any sheet",
+    };
+  }
+
+  console.log(
+    `[INDEX-FILE] "${job.itemName}": ${grid.sheets.length} sheet(s) produced ${allRecords.length} record(s).`
+  );
+
+  // Embed and upload. Only embeddings here — the chat calls are already
+  // done — so a larger batch is safe.
+  const RECORD_BATCH_SIZE = 5;
+  let pagesIndexed = 0;
+  let pagesFailed = 0;
+
+  const embedAndUpload = async (index: number): Promise<boolean> => {
+    const record = allRecords[index];
+
+    // The sheet name and record title go INTO the embedded text, not
+    // just the metadata: a question like "when does Class 5 training
+    // start" needs "training" to be part of what was embedded.
+    const content = `[Sheet: ${record.sheetName}] ${record.title}\n\n${record.content}`;
+
+    const embedding = await generateEmbedding(content);
+    if (!embedding) {
+      console.warn(
+        `[INDEX-FILE] Failed to embed record ${index} ("${record.title}") of "${job.itemName}".`
+      );
+      return false;
+    }
+
+    return uploadDocument(buildDoc(job, index, content, embedding));
+  };
+
+  for (let start = 0; start < allRecords.length; start += RECORD_BATCH_SIZE) {
+    const batch: number[] = [];
+    for (let i = start; i < Math.min(start + RECORD_BATCH_SIZE, allRecords.length); i++) {
+      batch.push(i);
+    }
+
+    const results = await Promise.allSettled(batch.map(embedAndUpload));
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error(
+          `[INDEX-FILE] Record upload threw for "${job.itemName}": ${result.reason}`
+        );
+        pagesFailed++;
+        continue;
+      }
+      if (result.value) pagesIndexed++;
+      else pagesFailed++;
+    }
+  }
+
+  return {
+    ok: pagesIndexed > 0,
+    pagesIndexed,
+    pagesFailed,
+    pagesCaptioned: 0,
+    pagesCaptionSkipped: 0,
+    chunksDeleted,
+  };
+}
+
+// ---------------------------------------------------------------------
 // PPTX path — slide-based, no captioning
 // ---------------------------------------------------------------------
 
@@ -476,6 +642,17 @@ async function indexPptxFile(
   };
 }
 
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+};
+
+function getExtension(fileName: string): string {
+  const dot = fileName.lastIndexOf(".");
+  return dot === -1 ? "" : fileName.slice(dot).toLowerCase();
+}
+
 // ---------------------------------------------------------------------
 // Image path — single chunk, full transcription
 // ---------------------------------------------------------------------
@@ -483,13 +660,38 @@ async function indexPptxFile(
 async function indexImageFile(
   job: IndexFileMessage,
   base64Content: string,
-  mimeType: string,
   chunksDeleted: number
 ): Promise<IndexFileResult> {
+  // Derived here rather than passed in, so this matches the FileHandler
+  // signature and can live in FILE_HANDLERS with every other format.
+  const mimeType = IMAGE_MIME_TYPES[getExtension(job.itemName)] ?? "image/png";
+
   const transcription = await generateImageTranscription(base64Content, job.itemName, mimeType);
 
   if (!transcription) {
     return { ...EMPTY_RESULT, chunksDeleted, error: "Image transcription failed" };
+  }
+
+  // A logo or decorative graphic has nothing searchable in it. Indexing
+  // it would add a chunk that competes with real content in every query,
+  // so it's deliberately left out of the index entirely.
+  //
+  // NOTE: this means the file has no chunkIndex 0 document, so
+  // getIndexedFileState() won't see it and every sync will re-check it.
+  // That costs one vision call per sync per skipped image — acceptable
+  // for a handful of files, but worth revisiting if a library fills up
+  // with decorative images.
+  if (isSkipCaption(transcription)) {
+    console.log(
+      `[INDEX-FILE] "${job.itemName}" has no informational content (logo or decorative) — not indexed.`
+    );
+    return {
+      ...EMPTY_RESULT,
+      chunksDeleted,
+      pagesCaptionSkipped: 1,
+      skipped: true,
+      error: "Image has no informational content",
+    };
   }
 
   const embedding = await generateEmbedding(transcription);
@@ -518,11 +720,38 @@ async function indexImageFile(
 // Router
 // ---------------------------------------------------------------------
 
-const IMAGE_MIME_TYPES: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
+/** Signature every format handler shares. */
+type FileHandler = (
+  job: IndexFileMessage,
+  base64Content: string,
+  chunksDeleted: number
+) => Promise<IndexFileResult>;
+
+/**
+ * Extension to handler. This is the single source of truth for which
+ * formats are supported — syncRunner imports the keys rather than
+ * keeping its own list, so adding a format is one edit, not two.
+ */
+const FILE_HANDLERS: Record<string, FileHandler> = {
+  ".pdf": indexPdfFile,
+  ".docx": indexDocxFile,
+  ".pptx": indexPptxFile,
+  ".txt": indexPlainTextFile,
+  ".md": indexPlainTextFile,
+  // SheetJS reads all three spreadsheet formats through the same API.
+  ".xlsx": indexXlsxFile,
+  ".xls": indexXlsxFile,
+  ".csv": indexXlsxFile,
+  // The transcription IS the indexed content — there's no text layer.
+  ".png": indexImageFile,
+  ".jpg": indexImageFile,
+  ".jpeg": indexImageFile,
 };
+
+export const SUPPORTED_EXTENSIONS = Object.keys(FILE_HANDLERS);
+
+/** Extracts the lowercased extension, including the dot. */
+
 
 export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResult> {
   // On an update, remove old chunks FIRST. If a 5-chunk document becomes
@@ -534,35 +763,26 @@ export async function indexOneFile(job: IndexFileMessage): Promise<IndexFileResu
     console.log(`[INDEX-FILE] Removed ${chunksDeleted} old chunk(s) for "${job.itemName}".`);
   }
 
+  const handler = FILE_HANDLERS[getExtension(job.itemName)];
+
+  // Shouldn't happen — syncRunner filters on SUPPORTED_EXTENSIONS — but
+  // fail loudly rather than silently indexing nothing.
+  if (!handler) {
+    return {
+      ...EMPTY_RESULT,
+      chunksDeleted,
+      error: `Unsupported file type: ${job.itemName}`,
+    };
+  }
+
+  // Download AFTER the handler check: no point fetching bytes we can't
+  // process. (Deliberately after deleteFileChunks, though — an update
+  // whose type is no longer supported should still have its stale
+  // chunks removed.)
   const fileContent = await downloadDriveFile(job.driveId, job.itemId);
   if (!fileContent) {
     return { ...EMPTY_RESULT, chunksDeleted, error: "Download failed" };
   }
 
-  const name = job.itemName.toLowerCase();
-
-  if (name.endsWith(".pdf")) {
-    return indexPdfFile(job, fileContent.base64Content, chunksDeleted);
-  }
-
-  if (name.endsWith(".docx")) {
-    return indexDocxFile(job, fileContent.base64Content, chunksDeleted);
-  }
-
-  if (name.endsWith(".pptx")) {
-    return indexPptxFile(job, fileContent.base64Content, chunksDeleted);
-  }
-
-  const imageExt = Object.keys(IMAGE_MIME_TYPES).find((ext) => name.endsWith(ext));
-  if (imageExt) {
-    return indexImageFile(job, fileContent.base64Content, IMAGE_MIME_TYPES[imageExt], chunksDeleted);
-  }
-
-  // Shouldn't happen — syncRunner filters to supported types — but fail
-  // loudly rather than silently indexing nothing.
-  return {
-    ...EMPTY_RESULT,
-    chunksDeleted,
-    error: `Unsupported file type: ${job.itemName}`,
-  };
+  return handler(job, fileContent.base64Content, chunksDeleted);
 }

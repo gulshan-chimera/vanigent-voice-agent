@@ -17,7 +17,8 @@
     "jszip": "^3.10.1",
     "mammoth": "^1.12.1",
     "pdf-to-img": "^6.2.0",
-    "pdfjs-dist": "^5.6.205"
+    "pdfjs-dist": "^5.6.205",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
