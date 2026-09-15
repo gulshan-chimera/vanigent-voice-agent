@@ -212,7 +212,14 @@ Transcribe and describe ALL informational content precisely:
 - If it's a scanned or photographed document, transcribe the text as accurately as you can read it.
 - Preserve exact numbers, dates, and names — do not paraphrase or round them.
 
-Do not describe layout, colors, or formatting unless that visual structure is itself the information (e.g. a flowchart's arrows). Focus entirely on the data.`;
+Do not describe layout, colors, or formatting unless that visual structure is itself the information (e.g. a flowchart's arrows). Focus entirely on the data.
+
+IF THERE IS NO INFORMATIONAL CONTENT AT ALL, respond with exactly this and nothing else:
+${SKIP_CAPTION}
+
+That applies to: company logos and branding, decorative graphics, banners and dividers, background textures, generic stock photography of people or offices that documents nothing specific, blank or near-blank images, and icons. These carry nothing a reader could search for, and indexing them adds noise that competes with real content in every search.
+
+Be strict about this — a company logo is ${SKIP_CAPTION}, even though you can read the company name in it. The test is whether someone could usefully search for this image's content, not whether it contains any text at all.`;
 
   const requestOptions = {
     method: "POST",
@@ -358,4 +365,168 @@ ${contextText}`;
     console.error(`[AZURE-OPENAI] Answer generation network error: ${(error as Error).message}`);
     return null;
   }
+}
+export interface SheetRecord {
+  title: string;
+  content: string;
+}
+
+/**
+ * Turns a spreadsheet's coordinate grid into self-contained records, one
+ * per logical row, each carrying its own column labels.
+ *
+ * Asking for JSON rather than prose is deliberate: the records become
+ * search chunks directly, so we need to control the boundaries rather
+ * than hoping free text splits sensibly.
+ *
+ * Returns null on failure so the caller can decide how to handle it.
+ */
+export async function generateSheetRecords(
+  fileName: string,
+  sheetName: string,
+  cellLines: string[],
+  mergedRanges: string[]
+): Promise<SheetRecord[] | null> {
+  const config = getConfig();
+  if (!config) return null;
+
+  const url = `${config.endpoint}/openai/deployments/${config.chatDeployment}/chat/completions?api-version=2024-06-01`;
+
+  const gridText = cellLines.join("\n");
+  const mergedText =
+    mergedRanges.length > 0
+      ? mergedRanges.join(", ")
+      : "(none)";
+
+  const systemPrompt = `You convert spreadsheet data into self-contained text records for a search index.
+
+You receive every non-empty cell of one sheet, addressed by cell reference, plus the list of merged cell ranges.
+
+YOUR TASK
+Work out the sheet's structure from the coordinates, then output one record per logical row of data.
+
+WHAT "SELF-CONTAINED" MEANS
+Each record must make complete sense read on its own, with no other record for context. That means every value carries its column label inline. A record reading "Northeast, B. Smith, 42" is useless; "Region: Northeast. Sales rep: B. Smith. Accounts: 42." is correct.
+
+STRUCTURE RULES
+- Header rows are often NOT row 1. A title spanning many columns, or a merged range like A1:M1, is usually a sheet title, not a header.
+- Headers can span two or three rows: a group label above, the column name below, and explanatory sub-text under that. Combine them into one meaningful label.
+- Merged ranges tell you a label covers several rows or columns. A merge like A3:A4 means that label applies to both rows.
+- ONE SHEET CAN CONTAIN SEVERAL SEPARATE TABLES, usually divided by blank rows. Treat each as its own table with its own headers. Never merge a row from one table with a row from another, even when they share a row label.
+- Blank spacer rows between data rows are formatting, not data. Ignore them.
+- Some rows are footnotes, totals, or notes rather than records. Handle them per the rules below.
+
+NOTES AND FOOTNOTES
+If a cell contains a note that qualifies a specific row (e.g. a warning that one particular class's dates may change), append it to THAT row's record. If it applies to the whole table, append it to every record in that table. Never leave a note as an orphan record with no context.
+
+TITLES
+Each record needs a short title identifying it: the row label plus which table it came from. For example "Class 5 — Recruiting & Onboarding Calendar".
+
+OUTPUT FORMAT
+Respond with ONLY valid JSON, no markdown fences, no commentary:
+{"records":[{"title":"...","content":"..."}]}
+
+Keep values exactly as they appear — do not reformat dates, correct spellings, or fix what look like errors in the source data. If a date says 2026 where 2025 seems intended, keep 2026.`;
+
+  const userPrompt = `File: ${fileName}
+Sheet: ${sheetName}
+Merged ranges: ${mergedText}
+
+Cells:
+${gridText}`;
+
+  const MAX_ATTEMPTS = 4;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": config.apiKey,
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 4000,
+          temperature: 0,
+          response_format: { type: "json_object" },
+        }),
+      });
+
+      if (response.status === 429) {
+        if (attempt === MAX_ATTEMPTS) {
+          console.error(
+            `[AZURE-OPENAI] Still rate limited after ${MAX_ATTEMPTS} attempts — giving up on sheet "${sheetName}".`
+          );
+          return null;
+        }
+
+        const retryAfterHeader = response.headers.get("retry-after");
+        const baseSeconds = retryAfterHeader
+          ? Number(retryAfterHeader)
+          : 5 * Math.pow(2, attempt - 1);
+        const waitSeconds = baseSeconds + Math.random() * 5;
+
+        console.warn(
+          `[AZURE-OPENAI] Rate limited on sheet records (attempt ${attempt}/${MAX_ATTEMPTS}) — waiting ${waitSeconds.toFixed(1)}s.`
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1000));
+        continue;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(
+          `[AZURE-OPENAI] Sheet record generation failed (${response.status}): ${errorText}`
+        );
+        return null;
+      }
+
+      const data = (await response.json()) as {
+        choices: { message: { content: string }; finish_reason?: string }[];
+      };
+
+      const choice = data.choices[0];
+
+      // A truncated response yields invalid JSON. Surface it rather than
+      // letting the parse failure look like a model error.
+      if (choice.finish_reason === "length") {
+        console.error(
+          `[AZURE-OPENAI] Sheet "${sheetName}" response hit the token limit — records incomplete.`
+        );
+        return null;
+      }
+
+      const parsed = JSON.parse(choice.message.content) as { records?: SheetRecord[] };
+
+      if (!Array.isArray(parsed.records) || parsed.records.length === 0) {
+        console.warn(`[AZURE-OPENAI] Sheet "${sheetName}" produced no records.`);
+        return null;
+      }
+
+      // Drop anything malformed rather than indexing a chunk with no content.
+      const valid = parsed.records.filter(
+        (r) => typeof r?.title === "string" && typeof r?.content === "string" && r.content.trim().length > 0
+      );
+
+      if (valid.length < parsed.records.length) {
+        console.warn(
+          `[AZURE-OPENAI] Sheet "${sheetName}": dropped ${parsed.records.length - valid.length} malformed record(s).`
+        );
+      }
+
+      console.log(`[AZURE-OPENAI] Sheet "${sheetName}" produced ${valid.length} record(s).`);
+      return valid.length > 0 ? valid : null;
+    } catch (error) {
+      console.error(
+        `[AZURE-OPENAI] Sheet record generation error for "${sheetName}": ${(error as Error).message}`
+      );
+      return null;
+    }
+  }
+
+  return null;
 }
