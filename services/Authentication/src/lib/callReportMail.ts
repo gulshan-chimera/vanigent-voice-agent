@@ -18,6 +18,7 @@ export interface FollowUpReport {
   customerName: string;
   openQuestions: string[];
   followUpRequired: boolean;
+  systemAffected?: string;
 }
 
 export interface CallReportContext {
@@ -66,23 +67,20 @@ function buildEmailBody(
     : `Thanks for calling the Vanigent Support Team. Please find below the call summary.`;
 
   const supportTag = hasQuestions
-    ? `<p><a href="mailto:${escapeHtml(supportEmail)}">@support_team</a>, please review the open questions below and try to resolve them.</p>`
+    ? `<p><a href="mailto:${escapeHtml(supportEmail)}">@support_team</a>, please review the follow-up questions below and try to resolve them.</p>`
     : "";
 
   const urgencyLabel = report.urgency
     ? report.urgency.charAt(0).toUpperCase() + report.urgency.slice(1)
     : "Unknown";
 
-  const questionsHeader = questions.length > 1 
-    ? `Open questions, Priority: ${escapeHtml(urgencyLabel)}` 
-    : `Open question, Priority: ${escapeHtml(urgencyLabel)}`;
+  const systemAffected = report.systemAffected ? escapeHtml(report.systemAffected) : "N/A";
 
-  const questionsSection = hasQuestions
-    ? `<h3 style="margin:20px 0 6px">${questionsHeader}</h3>
-       <ul style="line-height:1.6">
+  const questionsListHtml = hasQuestions
+    ? `<ul style="margin:0; padding-left:16px; line-height:1.5;">
          ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
        </ul>`
-    : "";
+    : "<em>None</em>";
 
   const callDateObj = context.startedAt ? new Date(context.startedAt) : new Date();
   const callDate = callDateObj.toLocaleDateString();
@@ -106,16 +104,22 @@ function buildEmailBody(
           <td style="padding:12px; color:#0f172a;">${escapeHtml(callTime)}</td>
         </tr>
         <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">System Affected</th>
+          <td style="padding:12px; color:#0f172a;">${systemAffected}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
           <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Urgency/Importance</th>
           <td style="padding:12px; color:#0f172a; font-weight:600;">${escapeHtml(urgencyLabel)}</td>
         </tr>
-        <tr>
-          <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Call Summary</th>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Summary</th>
           <td style="padding:12px; color:#0f172a; line-height:1.5;">${escapeHtml(report.summary)}</td>
         </tr>
+        <tr>
+          <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Follow-up questions</th>
+          <td style="padding:12px; color:#0f172a;">${questionsListHtml}</td>
+        </tr>
       </table>
-
-      ${questionsSection}
 
       <p style="margin-top:30px">Best Regards,</p>
       <p><strong>${escapeHtml(senderDisplayName)}</strong></p>
