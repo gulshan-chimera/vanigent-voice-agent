@@ -18,7 +18,6 @@ export interface FollowUpReport {
   customerName: string;
   openQuestions: string[];
   followUpRequired: boolean;
-  systemsAffected?: string[];
 }
 
 export interface CallReportContext {
@@ -74,10 +73,6 @@ function buildEmailBody(
     ? report.urgency.charAt(0).toUpperCase() + report.urgency.slice(1)
     : "Unknown";
 
-  const systemsAffectedList = report.systemsAffected && report.systemsAffected.length > 0 
-    ? escapeHtml(report.systemsAffected.join(", ")) 
-    : "N/A";
-
   const questionsListHtml = hasQuestions
     ? `<ul style="margin:0; padding-left:16px; line-height:1.5;">
          ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
@@ -104,10 +99,6 @@ function buildEmailBody(
         <tr style="border-bottom:1px solid #e2e8f0;">
           <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Time Called</th>
           <td style="padding:12px; color:#0f172a;">${escapeHtml(callTime)}</td>
-        </tr>
-        <tr style="border-bottom:1px solid #e2e8f0;">
-          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Systems Affected</th>
-          <td style="padding:12px; color:#0f172a;">${systemsAffectedList}</td>
         </tr>
         <tr style="border-bottom:1px solid #e2e8f0;">
           <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Urgency/Importance</th>

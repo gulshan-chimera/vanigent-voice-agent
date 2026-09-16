@@ -1,4 +1,4 @@
-import { downloadDriveFile } from "./sharepointFiles";
+import { downloadDriveFile, downloadDriveFileAsPdf } from "./sharepointFiles";
 import { deleteFileChunks, uploadDocument, KbDocument } from "./searchIndex";
 import { extractPageTexts } from "./pdfPageText";
 import { renderPdfPagesAsImages } from "./pdfImages";
@@ -581,65 +581,23 @@ async function indexXlsxFile(
 
 async function indexPptxFile(
   job: IndexFileMessage,
-  base64Content: string,
+  _base64Content: string,
   chunksDeleted: number
 ): Promise<IndexFileResult> {
-  const slideTexts = await extractPptxSlideTexts(base64Content);
+  // Use Microsoft Graph's native PDF conversion for PPTX files so that
+  // we can reuse the PDF pipeline (text extraction + image rendering + 
+  // vision captioning) for slides that are mostly screenshots.
+  const pdfBase64 = await downloadDriveFileAsPdf(job.driveId, job.itemId);
 
-  if (slideTexts.length === 0) {
-    return { ...EMPTY_RESULT, chunksDeleted, error: "No slides extracted" };
+  if (!pdfBase64) {
+    return {
+      ...EMPTY_RESULT,
+      chunksDeleted,
+      error: "PDF conversion failed for PPTX",
+    };
   }
 
-  const SLIDE_BATCH_SIZE = 5;
-  let pagesIndexed = 0;
-  let pagesFailed = 0;
-
-  const processSlide = async (i: number): Promise<boolean> => {
-    // A slide with no text (e.g. a title slide that's all imagery) must
-    // still be indexed — getIndexedFileState() identifies an indexed
-    // file by its chunkIndex 0 document, so an empty slide 1 would make
-    // the whole file invisible to the diff and it would re-index on
-    // every run.
-    const content =
-      slideTexts[i].trim() || `[Slide ${i + 1} of ${job.itemName} — no text content]`;
-
-    const embedding = await generateEmbedding(content);
-    if (!embedding) {
-      console.warn(`[INDEX-FILE] Failed to embed slide ${i + 1} of "${job.itemName}".`);
-      return false;
-    }
-    return uploadDocument(buildDoc(job, i, content, embedding));
-  };
-
-  for (let start = 0; start < slideTexts.length; start += SLIDE_BATCH_SIZE) {
-    const batch: number[] = [];
-    for (let i = start; i < Math.min(start + SLIDE_BATCH_SIZE, slideTexts.length); i++) {
-      batch.push(i);
-    }
-
-    const results = await Promise.allSettled(batch.map(processSlide));
-
-    for (const result of results) {
-      if (result.status === "rejected") {
-        console.error(
-          `[INDEX-FILE] Slide processing threw for "${job.itemName}": ${result.reason}`
-        );
-        pagesFailed++;
-        continue;
-      }
-      if (result.value) pagesIndexed++;
-      else pagesFailed++;
-    }
-  }
-
-  return {
-    ok: pagesIndexed > 0,
-    pagesIndexed,
-    pagesFailed,
-    pagesCaptioned: 0,
-    pagesCaptionSkipped: 0,
-    chunksDeleted,
-  };
+  return indexPdfFile(job, pdfBase64, chunksDeleted);
 }
 
 const IMAGE_MIME_TYPES: Record<string, string> = {

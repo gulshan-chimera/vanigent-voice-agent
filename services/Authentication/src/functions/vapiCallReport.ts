@@ -84,7 +84,6 @@ function extractReport(
         customerName: result.customerName ?? "",
         openQuestions: Array.isArray(result.openQuestions) ? result.openQuestions : [],
         followUpRequired: result.followUpRequired,
-        systemsAffected: Array.isArray(result.systemsAffected) ? result.systemsAffected : [],
       };
     }
   }
