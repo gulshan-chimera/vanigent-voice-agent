@@ -84,21 +84,36 @@ function buildEmailBody(
        </ul>`
     : "";
 
+  const callDateObj = context.startedAt ? new Date(context.startedAt) : new Date();
+  const callDate = callDateObj.toLocaleDateString();
+  const callTime = callDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
       <p>Hi ${escapeHtml(caller)},</p>
       <p>${introText}</p>
       ${supportTag}
       
-      <h2 style="margin:0 0 4px">Call summary</h2>
-      <p style="color:#555;margin:0 0 16px">
-        ${escapeHtml(caller)}
-        ${callerEmail ? ` &middot; ${escapeHtml(callerEmail)}` : ""}
-        ${durationMin !== null ? ` &middot; ${durationMin} min` : ""}
-        &middot; Call ID: ${escapeHtml(context.callId || "n/a")}
-      </p>
-
-      <p style="line-height:1.5">${escapeHtml(report.summary)}</p>
+      <h2 style="margin:24px 0 12px">Call summary</h2>
+      
+      <table style="width:100%; border-collapse:collapse; margin-bottom:24px; font-size:14px; text-align:left; border:1px solid #e2e8f0;">
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; width:30%; font-weight:600;">Date</th>
+          <td style="padding:12px; color:#0f172a;">${escapeHtml(callDate)}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Time Called</th>
+          <td style="padding:12px; color:#0f172a;">${escapeHtml(callTime)}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Urgency/Importance</th>
+          <td style="padding:12px; color:#0f172a; font-weight:600;">${escapeHtml(urgencyLabel)}</td>
+        </tr>
+        <tr>
+          <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Call Summary</th>
+          <td style="padding:12px; color:#0f172a; line-height:1.5;">${escapeHtml(report.summary)}</td>
+        </tr>
+      </table>
 
       ${questionsSection}
 
