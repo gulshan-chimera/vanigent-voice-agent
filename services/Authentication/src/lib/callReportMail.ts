@@ -10,6 +10,7 @@
 
 import { lookupCaller } from "./callerLookup";
 import { sendMail } from "./graphMail";
+import { getGraphAccessToken } from "./graphAuth";
 
 export interface FollowUpReport {
   summary: string;
@@ -47,47 +48,75 @@ function buildQuestionList(questions: string[]): string {
   return `<ul>\n${items}\n</ul>`;
 }
 
-function buildSupportBody(
+function buildEmailBody(
   report: FollowUpReport,
   context: CallReportContext,
-  callerEmail: string | null
+  callerEmail: string | null,
+  supportEmail: string,
+  callerDisplayName: string,
+  senderDisplayName: string
 ): string {
-  const emailLine = callerEmail
-    ? `<p><strong>Caller email:</strong> ${escapeHtml(callerEmail)} (copy sent)</p>`
-    : `<p style="color:#b00;"><strong>Caller email could not be resolved — no copy was sent to the caller.</strong></p>`;
+  const caller = callerDisplayName;
+  const durationMin = Math.round(context.durationSeconds / 60);
+  const questions = report.openQuestions || [];
+  const hasQuestions = questions.length > 0;
+
+  const introText = hasQuestions
+    ? `Thanks for calling the Vanigent Support Team. Please find below the call summary and the follow-up questions identified during the call.`
+    : `Thanks for calling the Vanigent Support Team. Please find below the call summary.`;
+
+  const supportTag = hasQuestions
+    ? `<p><a href="mailto:${escapeHtml(supportEmail)}">@support_team</a>, please review the follow-up questions below and try to resolve them.</p>`
+    : "";
+
+  const urgencyLabel = report.urgency
+    ? report.urgency.charAt(0).toUpperCase() + report.urgency.slice(1)
+    : "Unknown";
+
+  const questionsListHtml = hasQuestions
+    ? `<ul style="margin:0; padding-left:16px; line-height:1.5;">
+         ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
+       </ul>`
+    : "<em>None</em>";
+
+  const callDateObj = context.startedAt ? new Date(context.startedAt) : new Date();
+  const callDate = callDateObj.toLocaleDateString();
+  const callTime = callDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   return `
-<p><strong>Follow-up required from a support call.</strong></p>
-<p><strong>Caller:</strong> ${escapeHtml(report.customerName || "Unknown")}<br>
-<strong>Number:</strong> ${escapeHtml(context.callerNumber)}<br>
-<strong>Urgency:</strong> ${escapeHtml(report.urgency)}<br>
-<strong>Call time:</strong> ${escapeHtml(context.startedAt)}<br>
-<strong>Duration:</strong> ${Math.round(context.durationSeconds)} seconds</p>
-${emailLine}
-<h3>Questions needing follow-up</h3>
-${buildQuestionList(report.openQuestions)}
-<h3>Call summary</h3>
-<p>${escapeHtml(report.summary)}</p>
-<h3>Transcript</h3>
-<pre style="white-space:pre-wrap;font-family:inherit;">${escapeHtml(context.transcript)}</pre>
-<p style="color:#666;font-size:12px;">Call ID: ${escapeHtml(context.callId)}</p>
-`;
-}
+    <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
+      <p>Hi ${escapeHtml(caller)},</p>
+      <p>${introText}</p>
+      ${supportTag}
+      
+      <h2 style="margin:24px 0 12px">Call summary</h2>
+      
+      <table style="width:100%; border-collapse:collapse; margin-bottom:24px; font-size:14px; text-align:left; border:1px solid #e2e8f0;">
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; width:30%; font-weight:600;">Date</th>
+          <td style="padding:12px; color:#0f172a;">${escapeHtml(callDate)}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Time Called</th>
+          <td style="padding:12px; color:#0f172a;">${escapeHtml(callTime)}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Urgency/Importance</th>
+          <td style="padding:12px; color:#0f172a; font-weight:600;">${escapeHtml(urgencyLabel)}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Summary</th>
+          <td style="padding:12px; color:#0f172a; line-height:1.5;">${escapeHtml(report.summary)}</td>
+        </tr>
+        <tr>
+          <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Follow-up questions</th>
+          <td style="padding:12px; color:#0f172a;">${questionsListHtml}</td>
+        </tr>
+      </table>
 
-function buildCallerBody(report: FollowUpReport, context: CallReportContext): string {
-  const firstName = (report.customerName || "").split(" ")[0] || "there";
-
-  return `
-<p>Hi ${escapeHtml(firstName)},</p>
-<p>Thanks for calling employee support. There were a few things we couldn't
-answer on the call, so we've passed them to the team to follow up with you.</p>
-<h3>What we're following up on</h3>
-${buildQuestionList(report.openQuestions)}
-<h3>Summary of your call</h3>
-<p>${escapeHtml(report.summary)}</p>
-<p>Someone will be in touch. No action needed from you in the meantime.</p>
-<p style="color:#666;font-size:12px;">Call reference: ${escapeHtml(context.callId)}</p>
-`;
+      <p style="margin-top:30px">Best Regards,</p>
+      <p><strong>${escapeHtml(senderDisplayName)}</strong></p>
+    </div>`;
 }
 
 export async function sendFollowUpReport(
@@ -105,11 +134,17 @@ export async function sendFollowUpReport(
   // (a real mailbox) over userPrincipalName (a sign-in identifier that
   // may not route mail).
   let callerEmail: string | null = null;
+  let callerDisplayName: string = report.customerName || "";
+  let isAuthenticated = false;
 
   try {
     const lookup = await lookupCaller(context.callerNumber);
+    isAuthenticated = lookup.isAuthenticated;
     if (lookup.isAuthenticated && lookup.user) {
       callerEmail = lookup.user.mail ?? lookup.user.userPrincipalName ?? null;
+      // Always use the full display name from Entra ID instead of the
+      // AI-extracted customerName, which can be inconsistent.
+      callerDisplayName = lookup.user.displayName ?? callerDisplayName;
     }
   } catch (error) {
     console.warn(
@@ -117,28 +152,55 @@ export async function sendFollowUpReport(
     );
   }
 
+  if (!isAuthenticated) {
+    console.log(
+      `[CALL-REPORT-MAIL] Caller ${context.callerNumber} is not authenticated in Entra ID. Skipping follow-up email.`
+    );
+    return { supportSent: false, callerSent: false, callerEmail: null };
+  }
+
   if (!callerEmail) {
     console.warn(
-      `[CALL-REPORT-MAIL] No mailbox found for ${context.callerNumber} — support only.`
+      `[CALL-REPORT-MAIL] No mailbox found for authenticated user ${context.callerNumber} — support only.`
     );
   }
 
-  const subjectSuffix = report.customerName ? ` — ${report.customerName}` : "";
+  const subjectSuffix = callerDisplayName ? ` \u2014 ${callerDisplayName}` : "";
+  const subject = `Support call follow-up${subjectSuffix}`;
 
-  const supportSent = await sendMail({
-    to: [supportEmail],
-    subject: `Support call follow-up (${report.urgency})${subjectSuffix}`,
-    htmlBody: buildSupportBody(report, context, callerEmail),
-  });
-
-  let callerSent = false;
+  const toRecipients = [supportEmail];
   if (callerEmail) {
-    callerSent = await sendMail({
-      to: [callerEmail],
-      subject: "Following up on your support call",
-      htmlBody: buildCallerBody(report, context),
-    });
+    toRecipients.push(callerEmail);
   }
 
-  return { supportSent, callerSent, callerEmail };
+  // Fetch the display name of the sender mailbox (CALL_REPORT_SENDER_UPN)
+  // to use in the "Best Regards" sign-off.
+  const senderUpn = process.env.CALL_REPORT_SENDER_UPN || "";
+  let senderDisplayName = "Vanigent Support Team";
+
+  if (senderUpn) {
+    try {
+      const graphToken = await getGraphAccessToken();
+      if (graphToken) {
+        const res = await fetch(
+          `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderUpn)}?$select=displayName`,
+          { headers: { Authorization: `Bearer ${graphToken}` } }
+        );
+        if (res.ok) {
+          const data = (await res.json()) as { displayName?: string };
+          if (data.displayName) senderDisplayName = data.displayName;
+        }
+      }
+    } catch {
+      // Fall back to the default name if the lookup fails.
+    }
+  }
+
+  const sent = await sendMail({
+    to: toRecipients,
+    subject: subject,
+    htmlBody: buildEmailBody(report, context, callerEmail, supportEmail, callerDisplayName, senderDisplayName),
+  });
+
+  return { supportSent: sent, callerSent: sent && !!callerEmail, callerEmail };
 }

@@ -22,10 +22,10 @@ import {
   IndexedFileState,
 } from "./searchIndex";
 import { ensureQueueExists, enqueueIndexJob, IndexFileMessage } from "./indexQueue";
+import { SUPPORTED_EXTENSIONS } from "./fileIndexer";
 
 // File types the indexer can handle. Adding a type here makes the next
 // sync pick it up automatically — including the scheduled run.
-const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".pptx", ".png", ".jpg", ".jpeg"];
 
 function isSupported(fileName: string): boolean {
   const lower = fileName.toLowerCase();
