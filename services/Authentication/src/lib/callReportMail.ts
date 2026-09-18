@@ -106,8 +106,8 @@ function buildEmailBody(
           <td style="padding:12px; color:#0f172a;">${escapeHtml(callTime)}</td>
         </tr>
         <tr style="border-bottom:1px solid #e2e8f0;">
-          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Caller ID</th>
-          <td style="padding:12px; color:#0f172a;">${escapeHtml(context.callerNumber || "Unknown")}</td>
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Call ID</th>
+          <td style="padding:12px; color:#0f172a;">${escapeHtml(context.callId || "Unknown")}</td>
         </tr>
         <tr style="border-bottom:1px solid #e2e8f0;">
           <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Urgency/Importance</th>

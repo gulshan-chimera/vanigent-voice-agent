@@ -23,7 +23,7 @@ export async function answerQuestion(question: string): Promise<string> {
     return FALLBACK_ANSWER;
   }
 
-  const contextChunks: { fileName: string; content: string }[] = [];
+  const contextChunks: { fileName: string; library: string; content: string }[] = [];
 
   try {
     const results = await searchClient.search(question, {
@@ -64,6 +64,7 @@ export async function answerQuestion(question: string): Promise<string> {
 
       contextChunks.push({
         fileName: result.document.fileName,
+        library: result.document.library,
         content: result.document.content,
       });
       chunkIdx++;
