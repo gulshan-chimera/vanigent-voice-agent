@@ -80,8 +80,13 @@ function buildEmailBody(
     : "<em>None</em>";
 
   const callDateObj = context.startedAt ? new Date(context.startedAt) : new Date();
-  const callDate = callDateObj.toLocaleDateString();
-  const callTime = callDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const callDate = callDateObj.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const callTime = callDateObj.toLocaleTimeString('en-US', { 
+    timeZone: 'America/New_York', 
+    hour: '2-digit', 
+    minute: '2-digit',
+    timeZoneName: 'short'
+  });
 
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
@@ -99,6 +104,10 @@ function buildEmailBody(
         <tr style="border-bottom:1px solid #e2e8f0;">
           <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Time Called</th>
           <td style="padding:12px; color:#0f172a;">${escapeHtml(callTime)}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Caller ID</th>
+          <td style="padding:12px; color:#0f172a;">${escapeHtml(context.callerNumber || "Unknown")}</td>
         </tr>
         <tr style="border-bottom:1px solid #e2e8f0;">
           <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Urgency/Importance</th>
