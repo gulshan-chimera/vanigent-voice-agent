@@ -5,7 +5,16 @@
 // index, generate a grounded answer.
 
 import { getSearchClient } from "./searchIndex";
-import { generateEmbedding, generateAnswer } from "./azureOpenAI";
+import { generateEmbedding, generateAnswer, AnswerContext } from "./azureOpenAI";
+import { teamNameForLibrary } from "./confidentiality";
+
+
+const CURRENCY_PATTERN =
+  /(\$\s?\d[\d,]*(\.\d{2})?)|(\b\d[\d,]*(\.\d{2})?\s?(dollars|usd)\b)|(\busd\s?\d[\d,]*)/i;
+
+function containsCurrencyFigure(text: string): boolean {
+  return CURRENCY_PATTERN.test(text);
+}
 
 const FALLBACK_ANSWER =
   "I don't have that information right now, but I can note it for the team to follow up.";
@@ -23,7 +32,7 @@ export async function answerQuestion(question: string): Promise<string> {
     return FALLBACK_ANSWER;
   }
 
-  const contextChunks: { fileName: string; content: string }[] = [];
+  const contextChunks: AnswerContext[] = [];
 
   try {
     const results = await searchClient.search(question, {
@@ -65,6 +74,8 @@ export async function answerQuestion(question: string): Promise<string> {
       contextChunks.push({
         fileName: result.document.fileName,
         content: result.document.content,
+        restricted: result.document.restricted ?? false,
+        library: result.document.library,
       });
       chunkIdx++;
     }
@@ -84,7 +95,19 @@ export async function answerQuestion(question: string): Promise<string> {
 
   if (!answer) {
     console.warn("[KB-ANSWER] generateAnswer returned null — returning fallback.");
+    return FALLBACK_ANSWER;
+  }
+  const restrictedChunks = contextChunks.filter((c) => c.restricted);
+
+  if (restrictedChunks.length > 0 && containsCurrencyFigure(answer)) {
+    const team = teamNameForLibrary(restrictedChunks[0].library);
+
+    console.warn(
+      `[KB-ANSWER] BLOCKED: answer contained a currency figure with restricted sources in context. Question: "${question}"`
+    );
+
+    return `That's not something I can share over the phone. Please contact your ${team} team for that information.`;
   }
 
-  return answer ?? FALLBACK_ANSWER;
+  return answer;
 }

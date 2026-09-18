@@ -24,6 +24,7 @@ export interface KbDocument {
   webUrl: string;
   lastModifiedDateTime: string;
   contentVector: number[];
+  restricted: boolean;
 }
 
 /** One row per indexed FILE (derived from its chunkIndex 0 page). */
@@ -104,6 +105,7 @@ export async function ensureIndexExists(): Promise<boolean> {
       { name: "content", type: "Edm.String", searchable: true },
       { name: "webUrl", type: "Edm.String", filterable: false, searchable: false },
       { name: "lastModifiedDateTime", type: "Edm.String", filterable: true, sortable: true },
+      { name: "restricted", type: "Edm.Boolean", filterable: true, searchable: false },
       {
         name: "contentVector",
         type: "Collection(Edm.Single)",
