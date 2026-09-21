@@ -77,7 +77,7 @@ function buildEmailBody(
     ? `<ul style="margin:0; padding-left:16px; line-height:1.5;">
          ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
        </ul>`
-    : "<em>None</em>";
+    : "<em>No follow-up needed as all questions were resolved during the call.</em>";
 
   const callDateObj = context.startedAt ? new Date(context.startedAt) : new Date();
   const callDate = callDateObj.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
