@@ -73,9 +73,9 @@ export async function answerQuestion(question: string): Promise<string> {
 
       contextChunks.push({
         fileName: result.document.fileName,
+        library: result.document.library,
         content: result.document.content,
         restricted: result.document.restricted ?? false,
-        library: result.document.library,
       });
       chunkIdx++;
     }
