@@ -19,17 +19,22 @@ function containsCurrencyFigure(text: string): boolean {
 const FALLBACK_ANSWER =
   "I don't have that information right now, but I can note it for the team to follow up.";
 
-export async function answerQuestion(question: string): Promise<string> {
+export interface AnswerResult {
+  answer: string;
+  departments: string[];
+}
+
+export async function answerQuestion(question: string): Promise<AnswerResult> {
   const queryVector = await generateEmbedding(question);
   if (!queryVector) {
     console.error("[KB-ANSWER] Failed to embed question.");
-    return FALLBACK_ANSWER;
+    return { answer: FALLBACK_ANSWER, departments: [] };
   }
 
   const searchClient = getSearchClient();
   if (!searchClient) {
     console.error("[KB-ANSWER] Search client not configured.");
-    return FALLBACK_ANSWER;
+    return { answer: FALLBACK_ANSWER, departments: [] };
   }
 
   const contextChunks: AnswerContext[] = [];
@@ -81,21 +86,28 @@ export async function answerQuestion(question: string): Promise<string> {
     }
   } catch (error) {
     console.error(`[KB-ANSWER] Search failed: ${(error as Error).message}`);
-    return FALLBACK_ANSWER;
+    return { answer: FALLBACK_ANSWER, departments: [] };
   }
 
   console.log(`[KB-ANSWER] Retrieved ${contextChunks.length} relevant chunk(s) for question: "${question}"`);
 
   if (contextChunks.length === 0) {
     console.warn("[KB-ANSWER] Zero chunks returned from search — returning fallback.");
-    return FALLBACK_ANSWER;
+    return { answer: FALLBACK_ANSWER, departments: [] };
   }
+
+  // Derive unique department names from the libraries that contributed chunks.
+  const departments = [
+    ...new Set(
+      contextChunks.map((c) => teamNameForLibrary(c.library)).filter((d) => d.length > 0)
+    ),
+  ];
 
   const answer = await generateAnswer(question, contextChunks);
 
   if (!answer) {
     console.warn("[KB-ANSWER] generateAnswer returned null — returning fallback.");
-    return FALLBACK_ANSWER;
+    return { answer: FALLBACK_ANSWER, departments };
   }
   const restrictedChunks = contextChunks.filter((c) => c.restricted);
 
@@ -106,8 +118,11 @@ export async function answerQuestion(question: string): Promise<string> {
       `[KB-ANSWER] BLOCKED: answer contained a currency figure with restricted sources in context. Question: "${question}"`
     );
 
-    return `That's not something I can share over the phone. Please contact your ${team} team for that information.`;
+    return {
+      answer: `That's not something I can share over the phone. Please contact your ${team} team for that information.`,
+      departments,
+    };
   }
 
-  return answer;
+  return { answer, departments };
 }
