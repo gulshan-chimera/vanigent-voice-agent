@@ -77,16 +77,16 @@ function buildEmailBody(
     ? `<ul style="margin:0; padding-left:16px; line-height:1.5;">
          ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
        </ul>`
-    : "<em>None</em>";
+    : "<em>No follow-up needed as all questions were resolved during the call.</em>";
 
   const callDateObj = context.startedAt ? new Date(context.startedAt) : new Date();
   const callDate = callDateObj.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
-  const callTime = callDateObj.toLocaleTimeString('en-US', { 
+  const rawTime = callDateObj.toLocaleTimeString('en-US', { 
     timeZone: 'America/New_York', 
     hour: '2-digit', 
-    minute: '2-digit',
-    timeZoneName: 'short'
+    minute: '2-digit'
   });
+  const callTime = `${rawTime} EST`;
 
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
