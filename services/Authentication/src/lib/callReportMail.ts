@@ -81,12 +81,12 @@ function buildEmailBody(
 
   const callDateObj = context.startedAt ? new Date(context.startedAt) : new Date();
   const callDate = callDateObj.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
-  const callTime = callDateObj.toLocaleTimeString('en-US', { 
+  const rawTime = callDateObj.toLocaleTimeString('en-US', { 
     timeZone: 'America/New_York', 
     hour: '2-digit', 
-    minute: '2-digit',
-    timeZoneName: 'short'
+    minute: '2-digit'
   });
+  const callTime = `${rawTime} EST`;
 
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
