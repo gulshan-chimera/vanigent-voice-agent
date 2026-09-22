@@ -145,7 +145,6 @@ export async function answerQuestionInner(
       contextChunks.push({
         fileName: result.document.fileName,
         library: result.document.library,
-        library: result.document.library,
         content: result.document.content,
         restricted: result.document.restricted ?? false,
       });
