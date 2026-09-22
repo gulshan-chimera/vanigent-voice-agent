@@ -19,7 +19,28 @@ function containsCurrencyFigure(text: string): boolean {
 const FALLBACK_ANSWER =
   "I don't have that information right now, but I can note it for the team to follow up.";
 
-export async function answerQuestion(question: string): Promise<string> {
+const ANSWER_DEADLINE_MS = 12000;
+
+const TIMEOUT_ANSWER =
+  "I'm having trouble looking that up right now — I can note it for the team to follow up.";
+
+async function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+
+  const deadline = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    // Without this, the process holds an open timer for the full
+    // duration even when the work finished first.
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function answerQuestionInner(question: string): Promise<string> {
   const queryVector = await generateEmbedding(question);
   if (!queryVector) {
     console.error("[KB-ANSWER] Failed to embed question.");
@@ -107,6 +128,24 @@ export async function answerQuestion(question: string): Promise<string> {
     );
 
     return `That's not something I can share over the phone. Please contact your ${team} team for that information.`;
+  }
+
+  return answer;
+}
+
+export async function answerQuestion(question: string): Promise<string> {
+  const started = Date.now();
+
+  const answer = await withDeadline(
+    answerQuestionInner(question),
+    ANSWER_DEADLINE_MS,
+    TIMEOUT_ANSWER
+  );
+
+  if (answer === TIMEOUT_ANSWER) {
+    console.error(
+      `[KB-ANSWER] DEADLINE EXCEEDED after ${Date.now() - started}ms — returned fallback. Question: "${question}"`
+    );
   }
 
   return answer;
