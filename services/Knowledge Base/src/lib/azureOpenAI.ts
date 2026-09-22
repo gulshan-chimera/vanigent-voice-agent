@@ -405,7 +405,7 @@ ${contextText}`;
           { role: "system", content: systemPrompt },
           { role: "user", content: question },
         ],
-        max_tokens: 300,
+        max_tokens: 150,
         temperature: 0,
       }),
     });
@@ -428,16 +428,6 @@ export interface SheetRecord {
   content: string;
 }
 
-/**
- * Turns a spreadsheet's coordinate grid into self-contained records, one
- * per logical row, each carrying its own column labels.
- *
- * Asking for JSON rather than prose is deliberate: the records become
- * search chunks directly, so we need to control the boundaries rather
- * than hoping free text splits sensibly.
- *
- * Returns null on failure so the caller can decide how to handle it.
- */
 export async function generateSheetRecords(
   fileName: string,
   sheetName: string,
