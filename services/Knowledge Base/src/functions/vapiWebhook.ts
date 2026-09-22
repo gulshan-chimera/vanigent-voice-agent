@@ -115,7 +115,7 @@ export async function vapiWebhook(
       // populate "Systems Affected" without relying on VAPI's
       // structured output.
       if (callId && departments.length > 0) {
-        trackDepartments(callId, departments);
+        await trackDepartments(callId, departments);
       }
 
       return { toolCallId: call.id, result: answer };

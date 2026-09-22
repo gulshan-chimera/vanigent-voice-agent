@@ -5,45 +5,80 @@
 // and the Authentication service fetches them at end-of-call to
 // populate "Systems Affected" in the follow-up email.
 //
-// Uses a simple in-memory Map with TTL cleanup. Calls rarely last
-// longer than 30 minutes, so a 1-hour TTL is more than sufficient.
+// Uses Azure Table Storage so data persists across Function App
+// instances and survives cold starts / instance recycling.
 
-const TTL_MS = 60 * 60 * 1000; // 1 hour
+import { TableClient, TableServiceClient } from "@azure/data-tables";
 
-interface CallEntry {
-  departments: Set<string>;
-  createdAt: number;
-}
+const TABLE_NAME = "CallDepartments";
 
-const callMap = new Map<string, CallEntry>();
+let tableClient: TableClient | null = null;
 
-/** Removes expired entries to prevent unbounded memory growth. */
-function cleanup(): void {
-  const now = Date.now();
-  for (const [callId, entry] of callMap) {
-    if (now - entry.createdAt > TTL_MS) {
-      callMap.delete(callId);
-    }
+function getTableClient(): TableClient | null {
+  if (tableClient) return tableClient;
+
+  const connectionString = process.env.AzureWebJobsStorage;
+  if (!connectionString) {
+    console.error("[DEPT-TRACKER] AzureWebJobsStorage is not set — cannot track departments.");
+    return null;
   }
+
+  const serviceClient = TableServiceClient.fromConnectionString(connectionString);
+  // Ensure the table exists (no-op if it already does).
+  serviceClient.createTable(TABLE_NAME).catch(() => {
+    // Table already exists — ignore.
+  });
+
+  tableClient = TableClient.fromConnectionString(connectionString, TABLE_NAME);
+  return tableClient;
 }
 
 /** Records one or more departments for a given call ID. */
-export function trackDepartments(callId: string, departments: string[]): void {
-  cleanup();
+export async function trackDepartments(callId: string, departments: string[]): Promise<void> {
+  const client = getTableClient();
+  if (!client || departments.length === 0) return;
 
-  let entry = callMap.get(callId);
-  if (!entry) {
-    entry = { departments: new Set(), createdAt: Date.now() };
-    callMap.set(callId, entry);
-  }
+  try {
+    // Try to fetch existing entry first
+    let existing: string[] = [];
+    try {
+      const entity = await client.getEntity<{ departments: string }>("call", callId);
+      existing = JSON.parse(entity.departments);
+    } catch {
+      // Entity doesn't exist yet — that's fine.
+    }
 
-  for (const dept of departments) {
-    if (dept) entry.departments.add(dept);
+    // Merge with new departments (deduplicated)
+    const merged = [...new Set([...existing, ...departments])];
+
+    await client.upsertEntity(
+      {
+        partitionKey: "call",
+        rowKey: callId,
+        departments: JSON.stringify(merged),
+        timestamp: new Date().toISOString(),
+      },
+      "Replace"
+    );
+
+    console.log(`[DEPT-TRACKER] Stored departments for call ${callId}: ${merged.join(", ")}`);
+  } catch (error) {
+    console.warn(
+      `[DEPT-TRACKER] Failed to store departments for call ${callId}: ${(error as Error).message}`
+    );
   }
 }
 
 /** Returns the accumulated departments for a call, or an empty array. */
-export function getDepartments(callId: string): string[] {
-  const entry = callMap.get(callId);
-  return entry ? [...entry.departments] : [];
+export async function getDepartments(callId: string): Promise<string[]> {
+  const client = getTableClient();
+  if (!client) return [];
+
+  try {
+    const entity = await client.getEntity<{ departments: string }>("call", callId);
+    return JSON.parse(entity.departments);
+  } catch {
+    // Entity not found
+    return [];
+  }
 }
