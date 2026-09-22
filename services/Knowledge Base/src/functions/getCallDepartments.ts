@@ -22,7 +22,7 @@ export async function getCallDepartments(
     };
   }
 
-  const departments = getDepartments(callId);
+  const departments = await getDepartments(callId);
 
   context.log(
     `[GET-CALL-DEPTS] callId=${callId} -> departments: ${departments.join(", ") || "(none)"}`
