@@ -18,6 +18,7 @@ export interface FollowUpReport {
   customerName: string;
   openQuestions: string[];
   followUpRequired: boolean;
+  systemsAffected?: string[];
 }
 
 export interface CallReportContext {
@@ -77,11 +78,16 @@ function buildEmailBody(
     ? `<ul style="margin:0; padding-left:16px; line-height:1.5;">
          ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
        </ul>`
-    : "<em>None</em>";
+    : "<em>No follow-up needed as all questions were resolved during the call.</em>";
 
   const callDateObj = context.startedAt ? new Date(context.startedAt) : new Date();
-  const callDate = callDateObj.toLocaleDateString();
-  const callTime = callDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const callDate = callDateObj.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const rawTime = callDateObj.toLocaleTimeString('en-US', { 
+    timeZone: 'America/New_York', 
+    hour: '2-digit', 
+    minute: '2-digit'
+  });
+  const callTime = `${rawTime} EST`;
 
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
@@ -101,8 +107,16 @@ function buildEmailBody(
           <td style="padding:12px; color:#0f172a;">${escapeHtml(callTime)}</td>
         </tr>
         <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Call ID</th>
+          <td style="padding:12px; color:#0f172a;">${escapeHtml(context.callId || "Unknown")}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
           <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Urgency/Importance</th>
           <td style="padding:12px; color:#0f172a; font-weight:600;">${escapeHtml(urgencyLabel)}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Systems Affected</th>
+          <td style="padding:12px; color:#0f172a;">${report.systemsAffected && report.systemsAffected.length > 0 ? escapeHtml(report.systemsAffected.join(", ")) : "<em>N/A</em>"}</td>
         </tr>
         <tr style="border-bottom:1px solid #e2e8f0;">
           <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Summary</th>

@@ -20,6 +20,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { isRequestAuthorized } from "../lib/verifyWebhookAuth";
 import { answerQuestion } from "../lib/knowledgeBaseAnswer";
+import { trackDepartments } from "../lib/callDepartmentTracker";
 
 interface VapiToolCallItem {
   id: string;
@@ -37,6 +38,7 @@ interface VapiWebhookBody {
   message: {
     type: string;
     toolCallList?: VapiToolCallItem[];
+    call?: { id?: string };
   };
 }
 
@@ -93,6 +95,8 @@ export async function vapiWebhook(
     return { status: 200, jsonBody: { results: [] } };
   }
 
+  const callId = body.message.call?.id ?? "";
+
   // allSettled, not all: if one lookup rejects, the others must still be
   // answered. With Promise.all a single rejection discards every result.
   const settled = await Promise.allSettled(
@@ -104,8 +108,15 @@ export async function vapiWebhook(
         return { toolCallId: call.id, result: NO_QUESTION_REPLY };
       }
 
-      const answer = await answerQuestion(question);
-      context.log(`[VAPI-WEBHOOK] Q: "${question}" -> A: "${answer}"`);
+      const { answer, departments } = await answerQuestion(question);
+      context.log(`[VAPI-WEBHOOK] Q: "${question}" -> A: "${answer}" | Depts: ${departments.join(", ") || "(none)"}`);
+
+      // Track departments for this call so the follow-up email can
+      // populate "Systems Affected" without relying on VAPI's
+      // structured output.
+      if (callId && departments.length > 0) {
+        await trackDepartments(callId, departments);
+      }
 
       return { toolCallId: call.id, result: answer };
     })

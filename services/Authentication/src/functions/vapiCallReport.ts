@@ -152,6 +152,30 @@ export async function vapiCallReport(
     transcript: message.transcript ?? "(no transcript)",
   };
 
+  // Fetch departments from the KB service using the call ID.
+  // This derives "Systems Affected" from the actual libraries queried
+  // during the call, rather than relying on VAPI's structured output.
+  const kbServiceUrl = process.env.KB_SERVICE_URL;
+  if (kbServiceUrl && reportContext.callId && reportContext.callId !== "(unknown)") {
+    try {
+      const deptUrl = `${kbServiceUrl}/api/getCallDepartments?callId=${encodeURIComponent(reportContext.callId)}`;
+      const deptRes = await fetch(deptUrl);
+      if (deptRes.ok) {
+        const deptData = (await deptRes.json()) as { departments?: string[] };
+        if (deptData.departments && deptData.departments.length > 0) {
+          report.systemsAffected = deptData.departments;
+          console.log(
+            `[CALL-REPORT] Systems affected for call ${reportContext.callId}: ${deptData.departments.join(", ")}`
+          );
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `[CALL-REPORT] Failed to fetch departments from KB service: ${(error as Error).message}`
+      );
+    }
+  }
+
   const result = await sendFollowUpReport(report, reportContext);
 
   context.log(

@@ -161,7 +161,7 @@ If there IS genuine visual content, describe only that. Do not mention the ignor
           : 5 * Math.pow(2, attempt - 1);
 
         const waitSeconds = baseSeconds + Math.random() * 5;
-        
+
         console.warn(
           `[AZURE-OPENAI] Rate limited (attempt ${attempt}/${MAX_ATTEMPTS}) — waiting ${waitSeconds}s.`
         );
@@ -318,7 +318,7 @@ export async function generateAnswer(
   const url = `${config.endpoint}/openai/deployments/${config.chatDeployment}/chat/completions?api-version=2024-06-01`;
 
   const contextText = contextChunks
-    .map((chunk, i) => `[Source ${i + 1}: ${chunk.fileName}]\n${chunk.content}`)
+    .map((chunk, i) => `[Source ${i + 1}: ${chunk.fileName} | Library: ${chunk.library}]\n${chunk.content}`)
     .join("\n\n");
 
   // Which teams own the restricted material in this context. Named
@@ -383,6 +383,12 @@ RULES:
 - No markdown, no lists, no formatting.
 - Spell numbers, percentages and dates in spoken form. Phone numbers digit by digit.
 - Never mention the context, the documents, sources, or that you looked anything up.
+
+DEPARTMENT IDENTIFICATION:
+Each source has a "Library" label (e.g. "HR KB", "IT KB", "Sales Operations KB"). Use this to identify which department owns the information.
+- If the caller asks "who should I contact?" or "whom should I reach out to?", tell them the department based on the library the answer came from. For example: "You would need to reach out to the HR team for that" or "That would be handled by the IT department."
+- If chunks come from multiple libraries, mention all relevant departments.
+- Do NOT say the library name itself — translate it to a natural department name (e.g. "HR KB" becomes "the HR team", "IT KB" becomes "the IT department", "Sales Operations KB" becomes "the Sales Operations team").
 ${sensitivityBlock}
 CONTEXT:
 ${contextText}`;

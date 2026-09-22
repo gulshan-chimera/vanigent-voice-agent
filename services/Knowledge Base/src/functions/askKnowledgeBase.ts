@@ -28,10 +28,10 @@ export async function askKnowledgeBase(
     return { status: 400, jsonBody: { error: "question is required" } };
   }
 
-  const answer = await answerQuestion(body.question);
-  context.log(`[ASK-KB] Q: "${body.question}" -> A: "${answer}"`);
+  const { answer, departments } = await answerQuestion(body.question);
+  context.log(`[ASK-KB] Q: "${body.question}" -> A: "${answer}" | Depts: ${departments.join(", ") || "(none)"}`);
 
-  return { status: 200, jsonBody: { answer } };
+  return { status: 200, jsonBody: { answer, departments } };
 }
 
 app.http("askKnowledgeBase", {

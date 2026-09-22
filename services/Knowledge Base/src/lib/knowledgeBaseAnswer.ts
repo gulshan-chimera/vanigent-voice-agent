@@ -145,6 +145,7 @@ export async function answerQuestionInner(
       contextChunks.push({
         fileName: result.document.fileName,
         library: result.document.library,
+        library: result.document.library,
         content: result.document.content,
         restricted: result.document.restricted ?? false,
       });
@@ -208,6 +209,10 @@ export async function answerQuestionInner(
       `[KB-ANSWER] BLOCKED: answer contained a currency figure with restricted sources in context. Question: "${question}"`
     );
 
+    return {
+      answer: `That's not something I can share over the phone. Please contact your ${team} team for that information.`,
+      departments,
+    };
     return {
       answer: `That's not something I can share over the phone. Please contact your ${team} team for that information.`,
       departments,
