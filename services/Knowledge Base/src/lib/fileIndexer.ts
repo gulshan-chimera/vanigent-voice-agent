@@ -1,11 +1,11 @@
-import { downloadDriveFile } from "./sharepointFiles";
+import { downloadDriveFile, downloadDriveFileAsPdf } from "./sharepointFiles";
 import { deleteFileChunks, uploadDocument, KbDocument } from "./searchIndex";
 import { extractPageTexts } from "./pdfPageText";
 import { renderPdfPagesAsImages } from "./pdfImages";
 import { extractDocxText } from "./docxText";
-import { extractPptxSlideTexts } from "./pptxText";
 import { chunkText } from "./textChunker";
 import { extractPlainText } from "./plainText";
+import { isDocumentRestricted } from "./confidentiality";
 import {
   generateEmbedding,
   generateImageCaption,
@@ -56,7 +56,8 @@ function buildDoc(
   job: IndexFileMessage,
   chunkIndex: number,
   content: string,
-  embedding: number[]
+  embedding: number[],
+  restricted: boolean
 ): KbDocument {
   return {
     id: buildDocId(job.driveId, job.itemId, chunkIndex),
@@ -69,6 +70,7 @@ function buildDoc(
     content,
     webUrl: job.webUrl,
     lastModifiedDateTime: job.lastModifiedDateTime,
+    restricted,
     contentVector: embedding,
   };
 }
@@ -91,6 +93,12 @@ async function indexPdfFile(
 ): Promise<IndexFileResult> {
   const pageTexts = await extractPageTexts(base64Content);
   const pageImages = await renderPdfPagesAsImages(base64Content);
+  // Detected from the whole document, not per page: a marking in the
+  // footer of page one applies to the entire file.
+  const { restricted, reason } = isDocumentRestricted(job.itemName,pageTexts.join("\n"));
+  if (restricted) {
+    console.log(`[INDEX-FILE] "${job.itemName}" is RESTRICTED — matched "${reason}".`);
+  }
 
   if (pageTexts.length === 0 || pageImages.length === 0) {
     return { ...EMPTY_RESULT, chunksDeleted, error: "No pages extracted" };
@@ -272,7 +280,7 @@ async function indexPdfFile(
       return false;
     }
 
-    return uploadDocument(buildDoc(job, chunkIndex, chunk.content, embedding));
+    return uploadDocument(buildDoc(job, chunkIndex, chunk.content, embedding,restricted));
   };
 
   for (let start = 0; start < pending.length; start += EMBED_BATCH_SIZE) {
@@ -316,10 +324,17 @@ async function indexDocxFile(
   chunksDeleted: number
 ): Promise<IndexFileResult> {
   const text = await extractDocxText(base64Content);
+    // Detected from the whole document, not per page: a marking in the
+    // footer of page one applies to the entire file.
+    if (!text) {
+      return { ...EMPTY_RESULT, chunksDeleted, error: "No text extracted from DOCX" };
+    }
 
-  if (!text) {
-    return { ...EMPTY_RESULT, chunksDeleted, error: "No text extracted from DOCX" };
+  const { restricted, reason } = isDocumentRestricted(job.itemName,text);
+  if (restricted) {
+    console.log(`[INDEX-FILE] "${job.itemName}" is RESTRICTED — matched "${reason}".`);
   }
+
 
   const chunks = chunkText(text);
 
@@ -343,7 +358,7 @@ async function indexDocxFile(
       console.warn(`[INDEX-FILE] Failed to embed chunk ${i + 1} of "${job.itemName}".`);
       return false;
     }
-    return uploadDocument(buildDoc(job, i, chunks[i], embedding));
+    return uploadDocument(buildDoc(job, i, chunks[i], embedding,restricted));
   };
 
   for (let start = 0; start < chunks.length; start += CHUNK_BATCH_SIZE) {
@@ -391,6 +406,13 @@ async function indexPlainTextFile(
   if (!text) {
     return { ...EMPTY_RESULT, chunksDeleted, error: "No text extracted from TXT" };
   }
+    // Detected from the whole document, not per page: a marking in the
+  // footer of page one applies to the entire file.
+  const { restricted, reason } = isDocumentRestricted(job.itemName,text);
+  if (restricted) {
+    console.log(`[INDEX-FILE] "${job.itemName}" is RESTRICTED — matched "${reason}".`);
+  }
+
 
   const chunks = chunkText(text);
 
@@ -410,7 +432,7 @@ async function indexPlainTextFile(
       console.warn(`[INDEX-FILE] Failed to embed chunk ${i + 1} of "${job.itemName}".`);
       return false;
     }
-    return uploadDocument(buildDoc(job, i, chunks[i], embedding));
+    return uploadDocument(buildDoc(job, i, chunks[i], embedding,restricted));
   };
 
   for (let start = 0; start < chunks.length; start += CHUNK_BATCH_SIZE) {
@@ -462,6 +484,14 @@ async function indexXlsxFile(
       chunksDeleted,
       error: "No usable sheets found in workbook",
     };
+  }
+    // Detected from the whole document, not per page: a marking in the
+  // footer of page one applies to the entire file.
+  const { restricted, reason } = isDocumentRestricted(job.itemName,
+    grid.sheets.map((s) => s.cellLines.join("\n")).join("\n")
+  );
+  if (restricted) {
+    console.log(`[INDEX-FILE] "${job.itemName}" is RESTRICTED — matched "${reason}".`);
   }
 
   if (grid.skipped.length > 0) {
@@ -541,7 +571,7 @@ async function indexXlsxFile(
       return false;
     }
 
-    return uploadDocument(buildDoc(job, index, content, embedding));
+    return uploadDocument(buildDoc(job, index, content, embedding,restricted));
   };
 
   for (let start = 0; start < allRecords.length; start += RECORD_BATCH_SIZE) {
@@ -581,65 +611,22 @@ async function indexXlsxFile(
 
 async function indexPptxFile(
   job: IndexFileMessage,
-  base64Content: string,
+  _base64Content: string,
   chunksDeleted: number
 ): Promise<IndexFileResult> {
-  const slideTexts = await extractPptxSlideTexts(base64Content);
+  // Use Microsoft Graph's native PDF conversion for PPTX files so that
+  // we can reuse the PDF pipeline (text extraction + image rendering + 
+  // vision captioning) for slides that are mostly screenshots.
+  const pdfBase64 = await downloadDriveFileAsPdf(job.driveId, job.itemId);
 
-  if (slideTexts.length === 0) {
-    return { ...EMPTY_RESULT, chunksDeleted, error: "No slides extracted" };
+  if (!pdfBase64) {
+    return {
+      ...EMPTY_RESULT,
+      chunksDeleted,
+      error: "PDF conversion failed for PPTX",
+    };
   }
-
-  const SLIDE_BATCH_SIZE = 5;
-  let pagesIndexed = 0;
-  let pagesFailed = 0;
-
-  const processSlide = async (i: number): Promise<boolean> => {
-    // A slide with no text (e.g. a title slide that's all imagery) must
-    // still be indexed — getIndexedFileState() identifies an indexed
-    // file by its chunkIndex 0 document, so an empty slide 1 would make
-    // the whole file invisible to the diff and it would re-index on
-    // every run.
-    const content =
-      slideTexts[i].trim() || `[Slide ${i + 1} of ${job.itemName} — no text content]`;
-
-    const embedding = await generateEmbedding(content);
-    if (!embedding) {
-      console.warn(`[INDEX-FILE] Failed to embed slide ${i + 1} of "${job.itemName}".`);
-      return false;
-    }
-    return uploadDocument(buildDoc(job, i, content, embedding));
-  };
-
-  for (let start = 0; start < slideTexts.length; start += SLIDE_BATCH_SIZE) {
-    const batch: number[] = [];
-    for (let i = start; i < Math.min(start + SLIDE_BATCH_SIZE, slideTexts.length); i++) {
-      batch.push(i);
-    }
-
-    const results = await Promise.allSettled(batch.map(processSlide));
-
-    for (const result of results) {
-      if (result.status === "rejected") {
-        console.error(
-          `[INDEX-FILE] Slide processing threw for "${job.itemName}": ${result.reason}`
-        );
-        pagesFailed++;
-        continue;
-      }
-      if (result.value) pagesIndexed++;
-      else pagesFailed++;
-    }
-  }
-
-  return {
-    ok: pagesIndexed > 0,
-    pagesIndexed,
-    pagesFailed,
-    pagesCaptioned: 0,
-    pagesCaptionSkipped: 0,
-    chunksDeleted,
-  };
+  return indexPdfFile(job, pdfBase64, chunksDeleted);
 }
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -667,10 +654,16 @@ async function indexImageFile(
   const mimeType = IMAGE_MIME_TYPES[getExtension(job.itemName)] ?? "image/png";
 
   const transcription = await generateImageTranscription(base64Content, job.itemName, mimeType);
-
   if (!transcription) {
     return { ...EMPTY_RESULT, chunksDeleted, error: "Image transcription failed" };
   }
+    // Detected from the whole document, not per page: a marking in the
+  // footer of page one applies to the entire file.
+  const { restricted, reason } = isDocumentRestricted(job.itemName,transcription);
+  if (restricted) {
+    console.log(`[INDEX-FILE] "${job.itemName}" is RESTRICTED — matched "${reason}".`);
+  }
+
 
   // A logo or decorative graphic has nothing searchable in it. Indexing
   // it would add a chunk that competes with real content in every query,
@@ -704,7 +697,7 @@ async function indexImageFile(
     };
   }
 
-  const uploaded = await uploadDocument(buildDoc(job, 0, transcription, embedding));
+  const uploaded = await uploadDocument(buildDoc(job, 0, transcription, embedding,restricted));
 
   return {
     ok: uploaded,

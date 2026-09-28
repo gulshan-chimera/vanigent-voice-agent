@@ -2,6 +2,7 @@
 //
 // Shared client helpers for calling Azure OpenAI — embeddings now,
 // chat completion (for answer generation + image captioning) later.
+import { teamNameForLibrary } from "./confidentiality";
 
 function getConfig() {
   const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
@@ -160,7 +161,7 @@ If there IS genuine visual content, describe only that. Do not mention the ignor
           : 5 * Math.pow(2, attempt - 1);
 
         const waitSeconds = baseSeconds + Math.random() * 5;
-        
+
         console.warn(
           `[AZURE-OPENAI] Rate limited (attempt ${attempt}/${MAX_ATTEMPTS}) — waiting ${waitSeconds}s.`
         );
@@ -300,9 +301,16 @@ Be strict about this — a company logo is ${SKIP_CAPTION}, even though you can 
  * grounded strictly in the provided context chunks. Returns null on
  * failure so the caller can decide how to handle it (fail closed).
  */
+export interface AnswerContext {
+  fileName: string;
+  content: string;
+  restricted: boolean;
+  library: string;
+}
+
 export async function generateAnswer(
   question: string,
-  contextChunks: { fileName: string; content: string }[]
+  contextChunks: AnswerContext[]
 ): Promise<string | null> {
   const config = getConfig();
   if (!config) return null;
@@ -310,8 +318,51 @@ export async function generateAnswer(
   const url = `${config.endpoint}/openai/deployments/${config.chatDeployment}/chat/completions?api-version=2024-06-01`;
 
   const contextText = contextChunks
-    .map((chunk, i) => `[Source ${i + 1}: ${chunk.fileName}]\n${chunk.content}`)
-    .join("\n\n---\n\n");
+    .map((chunk, i) => `[Source ${i + 1}: ${chunk.fileName} | Library: ${chunk.library}]\n${chunk.content}`)
+    .join("\n\n");
+
+  // Which teams own the restricted material in this context. Named
+  // explicitly so the caller is sent somewhere specific rather than
+  // being told vaguely to "contact the relevant department".
+  const restrictedTeams = [
+    ...new Set(
+      contextChunks
+        .filter((c) => c.restricted)
+        .map((c) => teamNameForLibrary(c.library))
+    ),
+  ];
+
+  const hasRestricted = restrictedTeams.length > 0;
+  const referralTeam = restrictedTeams[0] ?? "Sales Operations";
+
+  const sensitivityBlock = hasRestricted
+    ? `
+CONFIDENTIAL MATERIAL IS PRESENT IN THE CONTEXT BELOW.
+
+Some of the sources are internally confidential documents. You must judge, for this specific question, whether the caller is asking for sensitive data or for something that can be shared freely.
+
+TREAT AS SENSITIVE — do not state these, refer instead:
+- Any individual's pay, bonus, target earnings, commission, or incentive amount
+- Bonus targets, payout figures, or earnings potential for any role
+- Payout percentages, multipliers, attainment rates, or accelerators tied to compensation
+- Performance thresholds that determine what somebody is paid
+- Any dollar figure taken from a compensation or incentive plan
+
+CAN BE SHARED FREELY — answer these normally:
+- How a process works, who is eligible, when something happens
+- Timing, deadlines, and submission windows
+- Job expectations and responsibilities not tied to a payout figure
+- Where to go, who to contact, what form to use
+- Anything from a source that is not a confidential document
+
+Judge by what the number MEANS, not by whether it is a number. "Four percent employer match" from a benefits FAQ is shareable. "One hundred percent of quarterly target" from an incentive plan is not.
+
+WHEN THE QUESTION ASKS FOR SENSITIVE DATA, reply with only this, and nothing else:
+"That's not something I can share over the phone. Please contact your ${referralTeam} team for that information."
+
+Do not partially answer, do not hint at a range, do not confirm or deny a figure the caller suggests. If part of the question is shareable and part is not, answer the shareable part and refer the rest.
+`
+    : "";
 
   const systemPrompt = `You are answering an employee's question over the phone, using only the internal company documents provided below.
 
@@ -333,6 +384,12 @@ RULES:
 - Spell numbers, percentages and dates in spoken form. Phone numbers digit by digit.
 - Never mention the context, the documents, sources, or that you looked anything up.
 
+DEPARTMENT IDENTIFICATION:
+Each source has a "Library" label (e.g. "HR KB", "IT KB", "Sales Operations KB"). Use this to identify which department owns the information.
+- If the caller asks "who should I contact?" or "whom should I reach out to?", tell them the department based on the library the answer came from. For example: "You would need to reach out to the HR team for that" or "That would be handled by the IT department."
+- If chunks come from multiple libraries, mention all relevant departments.
+- Do NOT say the library name itself — translate it to a natural department name (e.g. "HR KB" becomes "the HR team", "IT KB" becomes "the IT department", "Sales Operations KB" becomes "the Sales Operations team").
+${sensitivityBlock}
 CONTEXT:
 ${contextText}`;
 
@@ -348,7 +405,7 @@ ${contextText}`;
           { role: "system", content: systemPrompt },
           { role: "user", content: question },
         ],
-        max_tokens: 300,
+        max_tokens: 150,
         temperature: 0,
       }),
     });
@@ -371,16 +428,6 @@ export interface SheetRecord {
   content: string;
 }
 
-/**
- * Turns a spreadsheet's coordinate grid into self-contained records, one
- * per logical row, each carrying its own column labels.
- *
- * Asking for JSON rather than prose is deliberate: the records become
- * search chunks directly, so we need to control the boundaries rather
- * than hoping free text splits sensibly.
- *
- * Returns null on failure so the caller can decide how to handle it.
- */
 export async function generateSheetRecords(
   fileName: string,
   sheetName: string,

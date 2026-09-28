@@ -9,7 +9,7 @@
 // silent.
 
 import { lookupCaller } from "./callerLookup";
-import { sendMail } from "./graphMail";
+import { sendMail, MailAttachment } from "./graphMail";
 import { getGraphAccessToken } from "./graphAuth";
 
 export interface FollowUpReport {
@@ -18,6 +18,8 @@ export interface FollowUpReport {
   customerName: string;
   openQuestions: string[];
   followUpRequired: boolean;
+  systemsAffected?: string[];
+  transcriptRequired?: boolean;
 }
 
 export interface CallReportContext {
@@ -66,33 +68,38 @@ function buildEmailBody(
     : `Thanks for calling the Vanigent Support Team. Please find below the call summary.`;
 
   const supportTag = hasQuestions
-    ? `<p><a href="mailto:${escapeHtml(supportEmail)}">@support_team</a>, please review the open questions below and try to resolve them.</p>`
+    ? `<p><a href="mailto:${escapeHtml(supportEmail)}">@support_team</a>, please review the follow-up questions below and try to resolve them.</p>`
     : "";
 
   const urgencyLabel = report.urgency
     ? report.urgency.charAt(0).toUpperCase() + report.urgency.slice(1)
     : "Unknown";
 
-  const questionsHeader = questions.length > 1 
-    ? `Open questions, Priority: ${escapeHtml(urgencyLabel)}` 
-    : `Open question, Priority: ${escapeHtml(urgencyLabel)}`;
-
-  const questionsSection = hasQuestions
-    ? `<h3 style="margin:20px 0 6px">${questionsHeader}</h3>
-       <ul style="line-height:1.6">
+  const questionsListHtml = hasQuestions
+    ? `<ul style="margin:0; padding-left:16px; line-height:1.5;">
          ${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
        </ul>`
-    : "";
+    : "<em>No follow-up needed as all questions were resolved during the call.</em>";
 
   const callDateObj = context.startedAt ? new Date(context.startedAt) : new Date();
-  const callDate = callDateObj.toLocaleDateString();
-  const callTime = callDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const callDate = callDateObj.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const rawTime = callDateObj.toLocaleTimeString('en-US', { 
+    timeZone: 'America/New_York', 
+    hour: '2-digit', 
+    minute: '2-digit'
+  });
+  const callTime = `${rawTime} EST`;
+
+  const transcriptNotice = report.transcriptRequired 
+    ? `<p><em>Note: The requested call transcript is attached to this email.</em></p>`
+    : "";
 
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
       <p>Hi ${escapeHtml(caller)},</p>
       <p>${introText}</p>
       ${supportTag}
+      ${transcriptNotice}
       
       <h2 style="margin:24px 0 12px">Call summary</h2>
       
@@ -106,16 +113,26 @@ function buildEmailBody(
           <td style="padding:12px; color:#0f172a;">${escapeHtml(callTime)}</td>
         </tr>
         <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Call ID</th>
+          <td style="padding:12px; color:#0f172a;">${escapeHtml(context.callId || "Unknown")}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
           <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Urgency/Importance</th>
           <td style="padding:12px; color:#0f172a; font-weight:600;">${escapeHtml(urgencyLabel)}</td>
         </tr>
-        <tr>
-          <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Call Summary</th>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; font-weight:600;">Systems Affected</th>
+          <td style="padding:12px; color:#0f172a;">${report.systemsAffected && report.systemsAffected.length > 0 ? escapeHtml(report.systemsAffected.join(", ")) : "<em>N/A</em>"}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Summary</th>
           <td style="padding:12px; color:#0f172a; line-height:1.5;">${escapeHtml(report.summary)}</td>
         </tr>
+        <tr>
+          <th style="padding:12px; background:#f8fafc; color:#475569; vertical-align:top; font-weight:600;">Follow-up questions</th>
+          <td style="padding:12px; color:#0f172a;">${questionsListHtml}</td>
+        </tr>
       </table>
-
-      ${questionsSection}
 
       <p style="margin-top:30px">Best Regards,</p>
       <p><strong>${escapeHtml(senderDisplayName)}</strong></p>
@@ -199,10 +216,20 @@ export async function sendFollowUpReport(
     }
   }
 
+  const attachments: MailAttachment[] = [];
+  if (report.transcriptRequired && context.transcript) {
+    attachments.push({
+      name: "transcript.txt",
+      contentType: "text/plain",
+      contentBytes: Buffer.from(context.transcript).toString("base64"),
+    });
+  }
+
   const sent = await sendMail({
     to: toRecipients,
     subject: subject,
     htmlBody: buildEmailBody(report, context, callerEmail, supportEmail, callerDisplayName, senderDisplayName),
+    attachments: attachments.length > 0 ? attachments : undefined,
   });
 
   return { supportSent: sent, callerSent: sent && !!callerEmail, callerEmail };

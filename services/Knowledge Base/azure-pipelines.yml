@@ -2,6 +2,7 @@ trigger:
   branches:
     include:
       - develop
+      - develop2
       - release1
   paths:
     include:
@@ -11,6 +12,7 @@ pr:
   branches:
     include:
       - develop
+      - develop2
       - release1
   paths:
     include:
@@ -23,7 +25,7 @@ variables:
   nodeVersion: '24.x'
   azureSubscription: 'Ask-Vanigent-Dev'
   functionAppNameDev1: 'vanigent-ai-kb-dev1'
-  ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/develop') }}:
+  ${{ if or(eq(variables['Build.SourceBranch'], 'refs/heads/develop'), eq(variables['Build.SourceBranch'], 'refs/heads/develop2')) }}:
     functionAppName: 'vanigent-ai-kb-dev'
     adoEnvironment: 'vanigent-dev'
   ${{ elseif eq(variables['Build.SourceBranch'], 'refs/heads/release1') }}:
@@ -75,7 +77,7 @@ stages:
   - stage: Deploy
     displayName: 'Deploy to Azure Function App'
     dependsOn: Build_And_Test
-    condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/develop', 'refs/heads/release1'))
+    condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/develop', 'refs/heads/develop2', 'refs/heads/release1'))
     jobs:
       - deployment: Deploy_KnowledgeBase
         environment: '$(adoEnvironment)'
@@ -100,7 +102,7 @@ stages:
       # -------------------------------------------------------------------
       - deployment: Deploy_KnowledgeBase_Dev1
         displayName: 'Deploy to vanigent-ai-kb-dev1'
-        condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
+        condition: or(eq(variables['Build.SourceBranch'], 'refs/heads/develop'), eq(variables['Build.SourceBranch'], 'refs/heads/develop2'))
         environment: '$(adoEnvironment)'
         strategy:
           runOnce:
