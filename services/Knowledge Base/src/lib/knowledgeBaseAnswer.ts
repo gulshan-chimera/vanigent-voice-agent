@@ -212,10 +212,6 @@ export async function answerQuestionInner(
       answer: `That's not something I can share over the phone. Please contact your ${team} team for that information.`,
       departments,
     };
-    return {
-      answer: `That's not something I can share over the phone. Please contact your ${team} team for that information.`,
-      departments,
-    };
   }
 
   return {

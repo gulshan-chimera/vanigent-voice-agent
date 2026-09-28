@@ -9,7 +9,7 @@
 // silent.
 
 import { lookupCaller } from "./callerLookup";
-import { sendMail } from "./graphMail";
+import { sendMail, MailAttachment } from "./graphMail";
 import { getGraphAccessToken } from "./graphAuth";
 
 export interface FollowUpReport {
@@ -19,6 +19,7 @@ export interface FollowUpReport {
   openQuestions: string[];
   followUpRequired: boolean;
   systemsAffected?: string[];
+  transcriptRequired?: boolean;
 }
 
 export interface CallReportContext {
@@ -89,11 +90,16 @@ function buildEmailBody(
   });
   const callTime = `${rawTime} EST`;
 
+  const transcriptNotice = report.transcriptRequired 
+    ? `<p><em>Note: The requested call transcript is attached to this email.</em></p>`
+    : "";
+
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:640px">
       <p>Hi ${escapeHtml(caller)},</p>
       <p>${introText}</p>
       ${supportTag}
+      ${transcriptNotice}
       
       <h2 style="margin:24px 0 12px">Call summary</h2>
       
@@ -210,10 +216,20 @@ export async function sendFollowUpReport(
     }
   }
 
+  const attachments: MailAttachment[] = [];
+  if (report.transcriptRequired && context.transcript) {
+    attachments.push({
+      name: "transcript.txt",
+      contentType: "text/plain",
+      contentBytes: Buffer.from(context.transcript).toString("base64"),
+    });
+  }
+
   const sent = await sendMail({
     to: toRecipients,
     subject: subject,
     htmlBody: buildEmailBody(report, context, callerEmail, supportEmail, callerDisplayName, senderDisplayName),
+    attachments: attachments.length > 0 ? attachments : undefined,
   });
 
   return { supportSent: sent, callerSent: sent && !!callerEmail, callerEmail };

@@ -8,10 +8,17 @@
 
 import { getGraphAccessToken } from "./graphAuth";
 
+export interface MailAttachment {
+  name: string;
+  contentType: string;
+  contentBytes: string; // Base64 string
+}
+
 export interface MailMessage {
   to: string[];
   subject: string;
   htmlBody: string;
+  attachments?: MailAttachment[];
 }
 
 export async function sendMail(message: MailMessage): Promise<boolean> {
@@ -37,7 +44,7 @@ export async function sendMail(message: MailMessage): Promise<boolean> {
 
   const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderUpn)}/sendMail`;
 
-  const body = {
+  const body: any = {
     message: {
       subject: message.subject,
       body: { contentType: "HTML", content: message.htmlBody },
@@ -47,6 +54,16 @@ export async function sendMail(message: MailMessage): Promise<boolean> {
     },
     saveToSentItems: true,
   };
+
+  if (message.attachments && message.attachments.length > 0) {
+    body.message.hasAttachments = true;
+    body.message.attachments = message.attachments.map((a) => ({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: a.name,
+      contentType: a.contentType,
+      contentBytes: a.contentBytes,
+    }));
+  }
 
   try {
     const response = await fetch(url, {
