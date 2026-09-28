@@ -64,6 +64,7 @@ export function buildPhoneVariants(rawNumber: string): string[] {
     variants.add(`${area}-${mid}-${end}`);             // 718-841-0861
     variants.add(`1-${area}-${mid}-${end}`);           // 1-718-841-0861
     variants.add(`+1-${area}-${mid}-${end}`);          // +1-718-841-0861
+    variants.add(`+1${area}-${mid}-${end}`);          // +1718-841-0861
 
     // ── Parenthesised area code ───────────────────────────────────────
     variants.add(`(${area}) ${mid}-${end}`);           // (718) 841-0861
