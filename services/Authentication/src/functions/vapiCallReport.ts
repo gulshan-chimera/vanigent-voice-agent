@@ -15,6 +15,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { timingSafeEqual } from "crypto";
 import { sendFollowUpReport, FollowUpReport, CallReportContext } from "../lib/callReportMail";
+import { searchKnowledgeBase } from "../lib/documentMailer";
 
 interface StructuredOutputEntry {
   name?: string;
@@ -85,6 +86,7 @@ function extractReport(
         openQuestions: Array.isArray(result.openQuestions) ? result.openQuestions : [],
         followUpRequired: result.followUpRequired,
         transcriptRequired: typeof result.transcriptRequired === "boolean" ? result.transcriptRequired : false,
+        requestedDocumentQuery: typeof result.requestedDocumentQuery === "string" ? result.requestedDocumentQuery : undefined,
       };
     }
   }
@@ -174,6 +176,21 @@ export async function vapiCallReport(
       console.warn(
         `[CALL-REPORT] Failed to fetch departments from KB service: ${(error as Error).message}`
       );
+    }
+  }
+
+  if (report.requestedDocumentQuery) {
+    try {
+      const doc = await searchKnowledgeBase(report.requestedDocumentQuery);
+      if (doc && doc.webUrl) {
+        report.requestedDocumentName = doc.fileName;
+        report.requestedDocumentUrl = doc.webUrl;
+        context.log(`[CALL-REPORT] Found document for query "${report.requestedDocumentQuery}": ${doc.fileName}`);
+      } else {
+        context.warn(`[CALL-REPORT] No document found for query "${report.requestedDocumentQuery}"`);
+      }
+    } catch (error) {
+      context.warn(`[CALL-REPORT] Document search failed for query "${report.requestedDocumentQuery}": ${(error as Error).message}`);
     }
   }
 

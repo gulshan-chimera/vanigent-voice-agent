@@ -20,6 +20,9 @@ export interface FollowUpReport {
   followUpRequired: boolean;
   systemsAffected?: string[];
   transcriptRequired?: boolean;
+  requestedDocumentQuery?: string;
+  requestedDocumentName?: string;
+  requestedDocumentUrl?: string;
 }
 
 export interface CallReportContext {
@@ -101,6 +104,12 @@ function buildEmailBody(
       ${supportTag}
       ${transcriptNotice}
       
+      ${report.requestedDocumentName && report.requestedDocumentUrl ? `
+      <div style="margin:24px 0;padding:16px;background:#f8fafc;border-left:4px solid #0ea5e9;border-radius:4px">
+        <p style="margin:0 0 8px;font-weight:600;color:#0f172a">📄 ${escapeHtml(report.requestedDocumentName)}</p>
+        <p style="margin:0"><a href="${escapeHtml(report.requestedDocumentUrl)}" style="color:#0ea5e9;text-decoration:none;font-weight:500">Open in SharePoint &rarr;</a></p>
+      </div>` : ''}
+
       <h2 style="margin:24px 0 12px">Call summary</h2>
       
       <table style="width:100%; border-collapse:collapse; margin-bottom:24px; font-size:14px; text-align:left; border:1px solid #e2e8f0;">

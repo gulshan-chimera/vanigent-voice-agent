@@ -38,7 +38,7 @@ function buildDocumentEmailBody(
     </div>`;
 }
 
-async function searchKnowledgeBase(query: string) {
+export async function searchKnowledgeBase(query: string) {
   const kbUrl = process.env.KB_SERVICE_URL;
   const secret = process.env.VAPI_WEBHOOK_SECRET;
 
