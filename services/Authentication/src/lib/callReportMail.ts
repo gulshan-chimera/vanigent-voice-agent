@@ -20,9 +20,8 @@ export interface FollowUpReport {
   followUpRequired: boolean;
   systemsAffected?: string[];
   transcriptRequired?: boolean;
-  requestedDocumentQuery?: string;
-  requestedDocumentName?: string;
-  requestedDocumentUrl?: string;
+  requestedDocumentQueries?: string[];
+  requestedDocuments?: { name: string; url: string }[];
 }
 
 export interface CallReportContext {
@@ -104,11 +103,14 @@ function buildEmailBody(
       ${supportTag}
       ${transcriptNotice}
       
-      ${report.requestedDocumentName && report.requestedDocumentUrl ? `
-      <div style="margin:24px 0;padding:16px;background:#f8fafc;border-left:4px solid #0ea5e9;border-radius:4px">
-        <p style="margin:0 0 8px;font-weight:600;color:#0f172a">📄 ${escapeHtml(report.requestedDocumentName)}</p>
-        <p style="margin:0"><a href="${escapeHtml(report.requestedDocumentUrl)}" style="color:#0ea5e9;text-decoration:none;font-weight:500">Open in SharePoint &rarr;</a></p>
-      </div>` : ''}
+      ${report.requestedDocuments && report.requestedDocuments.length > 0 ? `
+      <p style="margin:24px 0 8px;color:#334155">As requested during your call, please find below the document${report.requestedDocuments.length > 1 ? 's' : ''} you asked for. Click the link${report.requestedDocuments.length > 1 ? 's' : ''} to view ${report.requestedDocuments.length > 1 ? 'them' : 'it'} directly in SharePoint.</p>
+      <h3 style="margin:16px 0 12px">Requested Documents</h3>
+      ${report.requestedDocuments.map(doc => `
+      <div style="margin:12px 0;padding:16px;background:#f8fafc;border-left:4px solid #0ea5e9;border-radius:4px">
+        <p style="margin:0 0 8px;font-weight:600;color:#0f172a">📄 ${escapeHtml(doc.name)}</p>
+        <p style="margin:0"><a href="${escapeHtml(doc.url)}" style="color:#0ea5e9;text-decoration:none;font-weight:500">Open in SharePoint &rarr;</a></p>
+      </div>`).join('')}` : ''}
 
       <h2 style="margin:24px 0 12px">Call summary</h2>
       
