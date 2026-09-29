@@ -104,7 +104,7 @@ function buildEmailBody(
       ${transcriptNotice}
       
       ${report.requestedDocuments && report.requestedDocuments.length > 0 ? `
-      <p style="margin:24px 0 8px;color:#334155">As requested during your call, please find below the document${report.requestedDocuments.length > 1 ? 's' : ''} you asked for. Click the link${report.requestedDocuments.length > 1 ? 's' : ''} to view ${report.requestedDocuments.length > 1 ? 'them' : 'it'} directly in SharePoint.</p>
+      <p style="margin:24px 0 8px">As requested during your call, please find below the document${report.requestedDocuments.length > 1 ? 's' : ''} you asked for. Click the link${report.requestedDocuments.length > 1 ? 's' : ''} to view ${report.requestedDocuments.length > 1 ? 'them' : 'it'} directly in SharePoint.</p>
       <h3 style="margin:16px 0 12px">Requested Documents</h3>
       ${report.requestedDocuments.map(doc => `
       <div style="margin:12px 0;padding:16px;background:#f8fafc;border-left:4px solid #0ea5e9;border-radius:4px">
