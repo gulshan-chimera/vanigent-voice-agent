@@ -40,7 +40,7 @@ function buildDocumentEmailBody(
 
 export async function searchKnowledgeBase(query: string) {
   const kbUrl = process.env.KB_SERVICE_URL;
-  const secret = process.env.VAPI_WEBHOOK_SECRET;
+  const secret = process.env.KB_API_SECRET;
 
   if (!kbUrl) {
     throw new Error("KB_SERVICE_URL is not configured.");
