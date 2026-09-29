@@ -19,7 +19,7 @@ import { searchKnowledgeBase } from "../lib/documentMailer";
 
 interface StructuredOutputEntry {
   name?: string;
-  result?: Partial<FollowUpReport>;
+  result?: Partial<FollowUpReport> & { requestedDocumentQuery?: string };
 }
 
 interface EndOfCallReportBody {
@@ -86,7 +86,9 @@ function extractReport(
         openQuestions: Array.isArray(result.openQuestions) ? result.openQuestions : [],
         followUpRequired: result.followUpRequired,
         transcriptRequired: typeof result.transcriptRequired === "boolean" ? result.transcriptRequired : false,
-        requestedDocumentQuery: typeof result.requestedDocumentQuery === "string" ? result.requestedDocumentQuery : undefined,
+        requestedDocumentQueries: Array.isArray(result.requestedDocumentQueries) ? result.requestedDocumentQueries
+          : typeof result.requestedDocumentQuery === "string" && result.requestedDocumentQuery ? [result.requestedDocumentQuery]
+          : undefined,
       };
     }
   }
@@ -179,18 +181,27 @@ export async function vapiCallReport(
     }
   }
 
-  if (report.requestedDocumentQuery) {
-    try {
-      const doc = await searchKnowledgeBase(report.requestedDocumentQuery);
-      if (doc && doc.webUrl) {
-        report.requestedDocumentName = doc.fileName;
-        report.requestedDocumentUrl = doc.webUrl;
-        context.log(`[CALL-REPORT] Found document for query "${report.requestedDocumentQuery}": ${doc.fileName}`);
-      } else {
-        context.warn(`[CALL-REPORT] No document found for query "${report.requestedDocumentQuery}"`);
+  if (report.requestedDocumentQueries && report.requestedDocumentQueries.length > 0) {
+    const foundDocs: { name: string; url: string }[] = [];
+    const seenNames = new Set<string>();
+
+    for (const query of report.requestedDocumentQueries) {
+      try {
+        const doc = await searchKnowledgeBase(query);
+        if (doc && doc.webUrl && !seenNames.has(doc.fileName)) {
+          foundDocs.push({ name: doc.fileName, url: doc.webUrl });
+          seenNames.add(doc.fileName);
+          context.log(`[CALL-REPORT] Found document for query "${query}": ${doc.fileName}`);
+        } else if (!doc) {
+          context.warn(`[CALL-REPORT] No document found for query "${query}"`);
+        }
+      } catch (error) {
+        context.warn(`[CALL-REPORT] Document search failed for query "${query}": ${(error as Error).message}`);
       }
-    } catch (error) {
-      context.warn(`[CALL-REPORT] Document search failed for query "${report.requestedDocumentQuery}": ${(error as Error).message}`);
+    }
+
+    if (foundDocs.length > 0) {
+      report.requestedDocuments = foundDocs;
     }
   }
 
