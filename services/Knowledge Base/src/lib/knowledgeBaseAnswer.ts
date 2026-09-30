@@ -147,6 +147,7 @@ export async function answerQuestionInner(
         library: result.document.library,
         content: result.document.content,
         restricted: result.document.restricted ?? false,
+        score: result.score,
       });
 
       chunkIdx++;
@@ -177,14 +178,25 @@ export async function answerQuestionInner(
     };
   }
 
-  // Derive unique department names from the libraries that contributed chunks.
-  const departments = [
-    ...new Set(
-      contextChunks
-        .map((c) => teamNameForLibrary(c.library))
-        .filter((d) => d.length > 0)
-    ),
-  ];
+  // Derive the department from the highest-scoring chunk only.
+  // This ensures "Systems Affected" shows only the most relevant department.
+  const topChunk = contextChunks.reduce((best, c) =>
+    (c.score ?? 0) > (best.score ?? 0) ? c : best
+  );
+  const topDept = teamNameForLibrary(topChunk.library);
+
+  // Log each chunk's department and score for debugging
+  for (const c of contextChunks) {
+    const dept = teamNameForLibrary(c.library);
+    const isTop = c === topChunk;
+    console.log(
+      `[KB-ANSWER] Dept check: "${dept}" | score=${c.score?.toFixed(4) ?? "N/A"} | file="${c.fileName}" | ${isTop ? "✅ TOP (selected)" : "⏭️ SKIPPED"}`
+    );
+  }
+
+  const departments = topDept.length > 0 ? [topDept] : [];
+
+  console.log(`[KB-ANSWER] Final department: ${departments.join(", ") || "(none)"}`);
 
   const answer = await generateAnswer(question, contextChunks);
 
@@ -208,10 +220,6 @@ export async function answerQuestionInner(
       `[KB-ANSWER] BLOCKED: answer contained a currency figure with restricted sources in context. Question: "${question}"`
     );
 
-    return {
-      answer: `That's not something I can share over the phone. Please contact your ${team} team for that information.`,
-      departments,
-    };
     return {
       answer: `That's not something I can share over the phone. Please contact your ${team} team for that information.`,
       departments,
