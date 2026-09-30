@@ -147,6 +147,7 @@ export async function answerQuestionInner(
         library: result.document.library,
         content: result.document.content,
         restricted: result.document.restricted ?? false,
+        score: result.score,
       });
 
       chunkIdx++;
@@ -178,9 +179,14 @@ export async function answerQuestionInner(
   }
 
   // Derive unique department names from the libraries that contributed chunks.
+  // Use a stricter score threshold than the general chunk inclusion threshold
+  // (0.005) to prevent low-relevance results from polluting "Systems Affected"
+  // with unrelated departments.
+  const DEPT_SCORE_THRESHOLD = 0.015;
   const departments = [
     ...new Set(
       contextChunks
+        .filter((c) => c.score === undefined || c.score >= DEPT_SCORE_THRESHOLD)
         .map((c) => teamNameForLibrary(c.library))
         .filter((d) => d.length > 0)
     ),

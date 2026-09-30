@@ -306,6 +306,7 @@ export interface AnswerContext {
   content: string;
   restricted: boolean;
   library: string;
+  score?: number;
 }
 
 export async function generateAnswer(
