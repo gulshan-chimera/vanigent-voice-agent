@@ -183,6 +183,16 @@ export async function answerQuestionInner(
   // (0.005) to prevent low-relevance results from polluting "Systems Affected"
   // with unrelated departments.
   const DEPT_SCORE_THRESHOLD = 0.015;
+
+  // Log each chunk's department and score for debugging
+  for (const c of contextChunks) {
+    const dept = teamNameForLibrary(c.library);
+    const passed = c.score === undefined || c.score >= DEPT_SCORE_THRESHOLD;
+    console.log(
+      `[KB-ANSWER] Dept check: "${dept}" | score=${c.score?.toFixed(4) ?? "N/A"} | file="${c.fileName}" | ${passed ? "✅ INCLUDED" : "❌ EXCLUDED (below threshold)"}`
+    );
+  }
+
   const departments = [
     ...new Set(
       contextChunks
@@ -191,6 +201,8 @@ export async function answerQuestionInner(
         .filter((d) => d.length > 0)
     ),
   ];
+
+  console.log(`[KB-ANSWER] Final departments: ${departments.join(", ") || "(none)"}`);
 
   const answer = await generateAnswer(question, contextChunks);
 
