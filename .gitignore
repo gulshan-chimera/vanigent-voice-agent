@@ -40,3 +40,4 @@ graphify-out/
 HR Agent/
 # Delta sync state (local per-machine)
 .sync-state.json
+transfer-captures/
