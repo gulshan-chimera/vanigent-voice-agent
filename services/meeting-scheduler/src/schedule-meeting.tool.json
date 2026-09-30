@@ -1,0 +1,73 @@
+{
+  "type": "function",
+  "async": false,
+  "function": {
+    "name": "schedule_meeting",
+    "description": "Creates the Microsoft 365 event and sends attendee invitations ONLY after the caller confirms the final title, attendees, date, time and duration. First run check_meeting_availability and read back the selected free slot. Use its exact date, startTime and confirmationToken. An initial request to schedule a meeting starts Tool 1, not this tool. Retry an uncertain creation with the identical arguments and call ID. New meetings request a Microsoft Teams link. Use event.joinUrl when returned; never invent a link, meeting ID, or passcode. If meetingLinkStatus is unavailable, report that the event exists but its Teams link was not returned. Include location only when supplied by the caller.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "attendeeEmails",
+        "date",
+        "startTime",
+        "duration",
+        "confirmed",
+        "confirmationToken"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Exact meeting title confirmed and checked by Tool 1."
+        },
+        "attendeeEmails": {
+          "type": "string",
+          "description": "Comma-separated confirmed directory emails returned by Tool 1. Do not include the organizer."
+        },
+        "date": {
+          "type": "string",
+          "description": "Absolute YYYY-MM-DD date of the selected slot returned by Tool 1. Do not send a relative date here."
+        },
+        "startTime": {
+          "type": "string",
+          "description": "Selected slot's startTime in HH:mm."
+        },
+        "duration": {
+          "type": "string",
+          "description": "Confirmed duration, for example 30 minutes. Must match Tool 1."
+        },
+        "timeZone": {
+          "type": "string",
+          "description": "Use the selected slot's timeZone, normally America/New_York."
+        },
+        "confirmed": {
+          "type": "string",
+          "enum": [
+            "true"
+          ],
+          "description": "Set to true only after the caller explicitly confirms the final meeting details."
+        },
+        "confirmationToken": {
+          "type": "string",
+          "description": "Copy the confirmationToken from the selected free requestedSlot or alternative in Tool 1. Valid for 15 minutes. Do not modify or read it aloud."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 5000,
+          "description": "Optional plain-text agenda or description, only when provided or requested by the caller. Do not invent it. Tool 2 must copy the exact description checked by Tool 1; recheck if it changes."
+        },
+        "location": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Optional physical meeting location or room, only when supplied by the caller. Copy the exact location from Tool 1 into Tool 2. This label does not reserve a room."
+        }
+      }
+    }
+  },
+  "server": {
+    "url": "https://YOUR-FUNCTION-APP.azurewebsites.net/api/scheduleMeeting",
+    "credentialId": "YOUR-VAPI-BEARER-CREDENTIAL-ID",
+    "timeoutSeconds": 120
+  }
+}
