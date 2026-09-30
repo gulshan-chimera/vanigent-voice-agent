@@ -1,0 +1,22 @@
+{
+  "name": "meeting-schedular",
+  "version": "1.0.0",
+  "description": "Meeting scheduler service for Vanigent Project",
+  "main": "dist/meeting-scheduler/src/functions/*.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node src/tests/entraUserSearch.test.cjs && node src/tests/meetingDetails.test.cjs && node src/tests/calendarAvailability.test.cjs && node src/tests/meetingTime.test.cjs && node src/tests/meetingBooking.test.cjs && node src/tests/checkMeetingAvailability.test.cjs && node src/tests/availabilityRequest.test.cjs && node src/tests/toolBookingFlow.test.cjs",
+    "search:entra": "npm run build && node src/tests/searchEntraUsers.cjs",
+    "watch": "tsc -w",
+    "start": "npm run build && func start",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.16.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "rimraf": "^5.0.10",
+    "typescript": "^5.9.3"
+  }
+}
