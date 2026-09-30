@@ -178,31 +178,25 @@ export async function answerQuestionInner(
     };
   }
 
-  // Derive unique department names from the libraries that contributed chunks.
-  // Use a stricter score threshold than the general chunk inclusion threshold
-  // (0.005) to prevent low-relevance results from polluting "Systems Affected"
-  // with unrelated departments.
-  const DEPT_SCORE_THRESHOLD = 0.015;
+  // Derive the department from the highest-scoring chunk only.
+  // This ensures "Systems Affected" shows only the most relevant department.
+  const topChunk = contextChunks.reduce((best, c) =>
+    (c.score ?? 0) > (best.score ?? 0) ? c : best
+  );
+  const topDept = teamNameForLibrary(topChunk.library);
 
   // Log each chunk's department and score for debugging
   for (const c of contextChunks) {
     const dept = teamNameForLibrary(c.library);
-    const passed = c.score === undefined || c.score >= DEPT_SCORE_THRESHOLD;
+    const isTop = c === topChunk;
     console.log(
-      `[KB-ANSWER] Dept check: "${dept}" | score=${c.score?.toFixed(4) ?? "N/A"} | file="${c.fileName}" | ${passed ? "✅ INCLUDED" : "❌ EXCLUDED (below threshold)"}`
+      `[KB-ANSWER] Dept check: "${dept}" | score=${c.score?.toFixed(4) ?? "N/A"} | file="${c.fileName}" | ${isTop ? "✅ TOP (selected)" : "⏭️ SKIPPED"}`
     );
   }
 
-  const departments = [
-    ...new Set(
-      contextChunks
-        .filter((c) => c.score === undefined || c.score >= DEPT_SCORE_THRESHOLD)
-        .map((c) => teamNameForLibrary(c.library))
-        .filter((d) => d.length > 0)
-    ),
-  ];
+  const departments = topDept.length > 0 ? [topDept] : [];
 
-  console.log(`[KB-ANSWER] Final departments: ${departments.join(", ") || "(none)"}`);
+  console.log(`[KB-ANSWER] Final department: ${departments.join(", ") || "(none)"}`);
 
   const answer = await generateAnswer(question, contextChunks);
 
