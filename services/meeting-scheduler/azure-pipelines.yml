@@ -1,0 +1,96 @@
+trigger:
+  branches:
+    include:
+      - develop
+      - develop2
+      - release1
+  paths:
+    include:
+      - services/meeting-scheduler/*
+
+pr:
+  branches:
+    include:
+      - develop
+      - develop2
+      - release1
+  paths:
+    include:
+      - services/meeting-scheduler/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  nodeVersion: '24.x'
+  azureSubscription: 'Ask-Vanigent-Dev'
+  ${{ if or(eq(variables['Build.SourceBranch'], 'refs/heads/develop'), eq(variables['Build.SourceBranch'], 'refs/heads/develop2')) }}:
+    functionAppName: 'vanigent-ai-meeting-schedular-dev'
+    adoEnvironment: 'vanigent-dev'
+  ${{ elseif eq(variables['Build.SourceBranch'], 'refs/heads/release1') }}:
+    functionAppName: 'vanigent-ai-meeting-schedular-uat'
+    adoEnvironment: 'vanigent-uat'
+  ${{ else }}:
+    functionAppName: 'vanigent-ai-meeting-schedular-dev'
+    adoEnvironment: 'vanigent-dev'
+
+stages:
+  - stage: Build_And_Test
+    displayName: 'Build Meeting Scheduler Service'
+    jobs:
+      - job: Build
+        displayName: 'Build Meeting Scheduler'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '$(nodeVersion)'
+            displayName: 'Install Node.js'
+
+          - script: |
+              npm ci
+              npm run build
+            workingDirectory: 'services/meeting-scheduler'
+            displayName: 'Install and Build'
+
+          - script: |
+              npm prune --production
+            workingDirectory: 'services/meeting-scheduler'
+            displayName: 'Prune dev dependencies'
+
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: 'services/meeting-scheduler'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/meeting-scheduler-$(Build.BuildId).zip'
+              replaceExistingArchive: true
+            displayName: 'Zip Artifact'
+
+          - publish: $(Build.ArtifactStagingDirectory)/meeting-scheduler-$(Build.BuildId).zip
+            artifact: meeting-scheduler-artifact
+            displayName: 'Publish Artifact'
+
+  # -------------------------------------------------------------------------
+  # DEPLOYMENT STAGE (Enabled)
+  # -------------------------------------------------------------------------
+  - stage: Deploy
+    displayName: 'Deploy to Azure Function App'
+    dependsOn: Build_And_Test
+    condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/develop', 'refs/heads/develop2', 'refs/heads/release1'))
+    jobs:
+      - deployment: Deploy_Meeting_Scheduler
+        environment: '$(adoEnvironment)'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: meeting-scheduler-artifact
+
+                - task: AzureFunctionApp@2
+                  inputs:
+                    connectedServiceNameARM: '$(azureSubscription)'
+                    appType: 'functionAppLinux'
+                    appName: '$(functionAppName)'
+                    package: '$(Pipeline.Workspace)/meeting-scheduler-artifact/meeting-scheduler-$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|24'
