@@ -30,7 +30,6 @@ export async function transferCall(
     return { status: 401, jsonBody: { error: "Unauthorized" } };
   }
   const rawBodyText = await request.text();
-  context.log(`[TRANSFER-CALL] RAW: ${rawBodyText}`);
   
   let body: any;
   try {
