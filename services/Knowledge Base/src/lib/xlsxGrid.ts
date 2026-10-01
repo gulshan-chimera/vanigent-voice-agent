@@ -1,23 +1,4 @@
-// src/lib/xlsxGrid.ts
-//
-// Extracts a spreadsheet as a coordinate-addressed cell grid, rather than
-// trying to parse its structure.
-//
-// Why not structural parsing: header rows aren't always row 1, sheets
-// contain multiple tables, labels sometimes run down a column instead of
-// across a row. Every heuristic that guesses at shape fails silently on
-// the next unfamiliar layout.
-//
-// Why not vision: rendering a sheet to an image clips any cell whose text
-// is wider than its column — confirmed on a real file, where a note and
-// several long headers were cut off mid-sentence in the render but came
-// back complete when reading cell values.
-//
-// So: emit every cell with its address, plus the merged ranges, and let a
-// model infer the structure from coordinates. Nothing is lost or guessed.
-
 import * as XLSX from "xlsx";
-
 export interface SheetGrid {
   sheetName: string;
   rowCount: number;
@@ -100,15 +81,16 @@ export function extractWorkbookGrid(base64Content: string): WorkbookGrid | null 
       cellText: true,
     });
 
+    const includeHidden = process.env.KB_INCLUDE_HIDDEN_SHEETS === "true";
     const sheets: SheetGrid[] = [];
     const skipped: SkippedSheet[] = [];
 
     workbook.SheetNames.forEach((sheetName, sheetIndex) => {
-      if (isHidden(workbook, sheetIndex)) {
-        console.log(`[XLSX-GRID] Sheet "${sheetName}" is hidden — skipping.`);
-        skipped.push({ sheetName, reason: "hidden" });
-        return;
-      }
+    if (!includeHidden && isHidden(workbook, sheetIndex)) {
+      console.log(`[XLSX-GRID] Sheet "${sheetName}" is hidden — skipping.`);
+      skipped.push({ sheetName, reason: "hidden" });
+      return;
+    }
 
       const sheet = workbook.Sheets[sheetName];
 
