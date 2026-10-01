@@ -438,46 +438,112 @@ export async function generateSheetRecords(
   const config = getConfig();
   if (!config) return null;
 
+  // Group cell lines by row so a batch never splits a row across calls.
+  // cellLines look like "C29: ...", so the leading number is the row.
+  const rowOf = (line: string): number => {
+    const m = line.match(/^[A-Z]+(\d+):/);
+    return m ? Number(m[1]) : 0;
+  };
+
+  const byRow = new Map<number, string[]>();
+  for (const line of cellLines) {
+    const r = rowOf(line);
+    const list = byRow.get(r) ?? [];
+    list.push(line);
+    byRow.set(r, list);
+  }
+  const rows = [...byRow.keys()].sort((a, b) => a - b);
+
+  // Rows per batch. Small enough that even wide, wordy rows can't approach
+  // the output token ceiling. The FAQ that lost data had ~63 rows; at 15
+  // per batch that's 5 calls, each producing ~13 short records.
+  const ROWS_PER_BATCH = 15;
+
+  const batches: string[][] = [];
+  for (let i = 0; i < rows.length; i += ROWS_PER_BATCH) {
+    const batchRows = rows.slice(i, i + ROWS_PER_BATCH);
+    batches.push(batchRows.flatMap((r) => byRow.get(r)!));
+  }
+
+  console.log(
+    `[AZURE-OPENAI] Sheet "${sheetName}": ${rows.length} row(s) in ${batches.length} batch(es).`
+  );
+
+  const allRecords: SheetRecord[] = [];
+
+  for (let b = 0; b < batches.length; b++) {
+    const records = await generateRecordsForCells(
+      config,
+      fileName,
+      sheetName,
+      batches[b],
+      mergedRanges,
+      b + 1,
+      batches.length
+    );
+
+    // A failed batch means that slice of rows is lost. Fail the whole
+    // sheet rather than silently index a partial one — the caller can
+    // retry, and a half-indexed sheet is the bug we're fixing.
+    if (records === null) {
+      console.error(
+        `[AZURE-OPENAI] Sheet "${sheetName}" batch ${b + 1}/${batches.length} failed — abandoning sheet.`
+      );
+      return null;
+    }
+
+    allRecords.push(...records);
+  }
+
+  console.log(`[AZURE-OPENAI] Sheet "${sheetName}" produced ${allRecords.length} record(s) total.`);
+  return allRecords.length > 0 ? allRecords : null;
+}
+
+async function generateRecordsForCells(
+  config: NonNullable<ReturnType<typeof getConfig>>,
+  fileName: string,
+  sheetName: string,
+  cellLines: string[],
+  mergedRanges: string[],
+  batchNum: number,
+  batchTotal: number
+): Promise<SheetRecord[] | null> {
   const url = `${config.endpoint}/openai/deployments/${config.chatDeployment}/chat/completions?api-version=2024-06-01`;
 
   const gridText = cellLines.join("\n");
-  const mergedText =
-    mergedRanges.length > 0
-      ? mergedRanges.join(", ")
-      : "(none)";
+  const mergedText = mergedRanges.length > 0 ? mergedRanges.join(", ") : "(none)";
 
   const systemPrompt = `You convert spreadsheet data into self-contained text records for a search index.
 
-You receive every non-empty cell of one sheet, addressed by cell reference, plus the list of merged cell ranges.
+You receive some of the non-empty cells of one sheet, addressed by cell reference, plus the list of merged cell ranges for the whole sheet. This may be one batch of a larger sheet; produce records only for the rows present in the cells given.
 
 YOUR TASK
-Work out the sheet's structure from the coordinates, then output one record per logical row of data.
+Work out the structure from the coordinates, then output one record per logical row of data.
 
 WHAT "SELF-CONTAINED" MEANS
-Each record must make complete sense read on its own, with no other record for context. That means every value carries its column label inline. A record reading "Northeast, B. Smith, 42" is useless; "Region: Northeast. Sales rep: B. Smith. Accounts: 42." is correct.
+Each record must make complete sense read on its own. Every value carries its column label inline. A record reading "Northeast, B. Smith, 42" is useless; "Region: Northeast. Sales rep: B. Smith. Accounts: 42." is correct.
 
 STRUCTURE RULES
 - Header rows are often NOT row 1. A title spanning many columns, or a merged range like A1:M1, is usually a sheet title, not a header.
-- Headers can span two or three rows: a group label above, the column name below, and explanatory sub-text under that. Combine them into one meaningful label.
-- Merged ranges tell you a label covers several rows or columns. A merge like A3:A4 means that label applies to both rows.
-- ONE SHEET CAN CONTAIN SEVERAL SEPARATE TABLES, usually divided by blank rows. Treat each as its own table with its own headers. Never merge a row from one table with a row from another, even when they share a row label.
-- Blank spacer rows between data rows are formatting, not data. Ignore them.
-- Some rows are footnotes, totals, or notes rather than records. Handle them per the rules below.
+- Headers can span two or three rows: combine them into one meaningful label.
+- Merged ranges tell you a label covers several rows or columns.
+- The header row may be OUTSIDE this batch. Infer the columns from the merged ranges and the cell contents; use the column position to label values consistently.
+- Blank spacer rows are formatting, not data. Ignore them.
 
 NOTES AND FOOTNOTES
-If a cell contains a note that qualifies a specific row (e.g. a warning that one particular class's dates may change), append it to THAT row's record. If it applies to the whole table, append it to every record in that table. Never leave a note as an orphan record with no context.
+If a cell qualifies a specific row, append it to that row's record. Never leave a note as an orphan record.
 
 TITLES
-Each record needs a short title identifying it: the row label plus which table it came from. For example "Class 5 — Recruiting & Onboarding Calendar".
+Each record needs a short title: the row's key value plus what kind of row it is, e.g. "How is CPD calculated? — Sales Ops FAQ".
 
 OUTPUT FORMAT
-Respond with ONLY valid JSON, no markdown fences, no commentary:
+Respond with ONLY valid JSON, no markdown fences:
 {"records":[{"title":"...","content":"..."}]}
 
-Keep values exactly as they appear — do not reformat dates, correct spellings, or fix what look like errors in the source data. If a date says 2026 where 2025 seems intended, keep 2026.`;
+Keep values exactly as they appear — do not reformat or correct anything.`;
 
   const userPrompt = `File: ${fileName}
-Sheet: ${sheetName}
+Sheet: ${sheetName} (batch ${batchNum} of ${batchTotal})
 Merged ranges: ${mergedText}
 
 Cells:
@@ -489,10 +555,7 @@ ${gridText}`;
     try {
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "api-key": config.apiKey,
-        },
+        headers: { "Content-Type": "application/json", "api-key": config.apiKey },
         body: JSON.stringify({
           messages: [
             { role: "system", content: systemPrompt },
@@ -506,72 +569,49 @@ ${gridText}`;
 
       if (response.status === 429) {
         if (attempt === MAX_ATTEMPTS) {
-          console.error(
-            `[AZURE-OPENAI] Still rate limited after ${MAX_ATTEMPTS} attempts — giving up on sheet "${sheetName}".`
-          );
+          console.error(`[AZURE-OPENAI] Rate limited out on "${sheetName}" batch ${batchNum}.`);
           return null;
         }
-
         const retryAfterHeader = response.headers.get("retry-after");
-        const baseSeconds = retryAfterHeader
-          ? Number(retryAfterHeader)
-          : 5 * Math.pow(2, attempt - 1);
+        const baseSeconds = retryAfterHeader ? Number(retryAfterHeader) : 5 * Math.pow(2, attempt - 1);
         const waitSeconds = baseSeconds + Math.random() * 5;
-
         console.warn(
-          `[AZURE-OPENAI] Rate limited on sheet records (attempt ${attempt}/${MAX_ATTEMPTS}) — waiting ${waitSeconds.toFixed(1)}s.`
+          `[AZURE-OPENAI] Rate limited "${sheetName}" batch ${batchNum} (attempt ${attempt}) — waiting ${waitSeconds.toFixed(1)}s.`
         );
-        await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1000));
+        await new Promise((r) => setTimeout(r, waitSeconds * 1000));
         continue;
       }
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(
-          `[AZURE-OPENAI] Sheet record generation failed (${response.status}): ${errorText}`
-        );
+        console.error(`[AZURE-OPENAI] "${sheetName}" batch ${batchNum} failed (${response.status}): ${await response.text()}`);
         return null;
       }
 
       const data = (await response.json()) as {
         choices: { message: { content: string }; finish_reason?: string }[];
       };
-
       const choice = data.choices[0];
 
-      // A truncated response yields invalid JSON. Surface it rather than
-      // letting the parse failure look like a model error.
+      // Still guard truncation. With 15 rows per batch this should never
+      // fire, but if a batch ever does hit the limit we must NOT keep a
+      // partial result — that's the silent-loss bug.
       if (choice.finish_reason === "length") {
         console.error(
-          `[AZURE-OPENAI] Sheet "${sheetName}" response hit the token limit — records incomplete.`
+          `[AZURE-OPENAI] "${sheetName}" batch ${batchNum} hit the token limit — reduce ROWS_PER_BATCH.`
         );
         return null;
       }
 
       const parsed = JSON.parse(choice.message.content) as { records?: SheetRecord[] };
+      if (!Array.isArray(parsed.records)) return null;
 
-      if (!Array.isArray(parsed.records) || parsed.records.length === 0) {
-        console.warn(`[AZURE-OPENAI] Sheet "${sheetName}" produced no records.`);
-        return null;
-      }
-
-      // Drop anything malformed rather than indexing a chunk with no content.
       const valid = parsed.records.filter(
         (r) => typeof r?.title === "string" && typeof r?.content === "string" && r.content.trim().length > 0
       );
 
-      if (valid.length < parsed.records.length) {
-        console.warn(
-          `[AZURE-OPENAI] Sheet "${sheetName}": dropped ${parsed.records.length - valid.length} malformed record(s).`
-        );
-      }
-
-      console.log(`[AZURE-OPENAI] Sheet "${sheetName}" produced ${valid.length} record(s).`);
-      return valid.length > 0 ? valid : null;
+      return valid;
     } catch (error) {
-      console.error(
-        `[AZURE-OPENAI] Sheet record generation error for "${sheetName}": ${(error as Error).message}`
-      );
+      console.error(`[AZURE-OPENAI] "${sheetName}" batch ${batchNum} error: ${(error as Error).message}`);
       return null;
     }
   }
