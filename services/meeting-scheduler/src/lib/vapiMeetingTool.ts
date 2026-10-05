@@ -1,6 +1,6 @@
 import { HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { timingSafeEqual } from "node:crypto";
-import { lookupMeetingCaller, EntraUserSearchError } from "./entraUserSearch";
+import { lookupMeetingCaller, searchEntraUsers, EntraUserSearchError } from "./entraUserSearch";
 import { prepareMeetingDetails } from "./meetingDetails";
 import { AvailabilityError, checkCalendarAvailability } from "./calendarAvailability";
 import { parseMeetingInput } from "./meetingTime";
@@ -8,6 +8,17 @@ import { BookingError, createConfirmedMeeting, issueConfirmation } from "./meeti
 
 function object(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+/** Email must come from credential-protected Vapi metadata, never model tool arguments. */
+async function resolveCallerEmail(value: unknown) {
+  if (typeof value !== "string" || value.length > 256 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value.trim())) return null;
+  const email = value.trim().toLowerCase();
+  const candidates = await searchEntraUsers(email);
+  if (candidates.length !== 1) return null;
+  const user = candidates[0];
+  return user.accountEnabled === true && user.id && user.email &&
+    [user.email, user.userPrincipalName].some(address => address?.toLowerCase() === email) ? user : null;
 }
 
 function authorized(request: HttpRequest): boolean {
@@ -56,15 +67,15 @@ export async function handleMeetingTool(request: HttpRequest, context: Invocatio
         if (booking && (args.confirmed !== "true" || typeof args.confirmationToken !== "string" || !args.confirmationToken)) {
           throw new BookingError("CONFIRMATION_REQUIRED", "Obtain explicit caller confirmation and pass the selected slot's confirmationToken from Tool 1.");
         }
-        if (typeof phone !== "string" || typeof metadata?.id !== "string" || !metadata.id ||
-            !["inboundPhoneCall", "outboundPhoneCall"].includes(String(metadata.type))) {
-          result = { status: "caller_unverified", message: "A phone call with a verifiable caller number is required. Attendee phone numbers are not needed." };
+        if (typeof metadata?.id !== "string" || !metadata.id.trim() ||
+            (!booking && (typeof phone !== "string" || !["inboundPhoneCall", "outboundPhoneCall"].includes(String(metadata.type))))) {
+          result = { status: "caller_unverified", message: booking ? "Supply a stable message.call.id and authenticated caller email in message.call.customer.email." : "A phone call with a verifiable caller number is required. Attendee phone numbers are not needed." };
         } else {
           // The protected call metadata, not model arguments, identifies the organizer.
-          callerPromise ??= lookupMeetingCaller(phone);
+          callerPromise ??= booking ? resolveCallerEmail(callerEmail) : lookupMeetingCaller(phone as string);
           const caller = await callerPromise;
-          if (!caller || (booking && (typeof callerEmail !== "string" || caller.email.toLowerCase() !== callerEmail.trim().toLowerCase()))) {
-            result = { status: "caller_unverified", message: "Caller phone and email must identify the same enabled Entra user. Supply message.call.customer.number and message.call.customer.email." };
+          if (!caller) {
+            result = { status: "caller_unverified", message: "Could not uniquely resolve an enabled caller from message.call.customer.email. Vapi must supply the authenticated caller email in call metadata." };
           } else {
             const preparation = await prepareMeetingDetails(caller, parsed, !booking);
             if (preparation.status === "needs_attendee_clarification") {

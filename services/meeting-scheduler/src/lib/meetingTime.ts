@@ -71,6 +71,14 @@ function localToInstant(date: string, time: string, timeZone: string): number {
 }
 
 export function parseMeetingInput(args: Record<string, unknown>, booking = false, now = Date.now()): ParsedMeetingInput {
+  if (booking) {
+    const emails = args.attendeeEmails;
+    if (!Array.isArray(emails) || !emails.length || emails.length > 19 || emails.some(email =>
+      typeof email !== "string" || email.length > 256 || !/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(email.trim()))) {
+      return invalid("Tool 2 requires attendeeEmails as an array of 1-19 directory email strings from Tool 1.");
+    }
+    args = { ...args, attendeeEmails: emails.map(email => (email as string).trim()).join(",") };
+  }
   const attendeeField = booking ? "attendeeEmails" : "attendees";
   const required = ["title", attendeeField, "date", "startTime", "duration"];
   const allowed = [...required, "timeZone", "description", "location", ...(booking ? ["confirmed", "confirmationToken"] : [])];

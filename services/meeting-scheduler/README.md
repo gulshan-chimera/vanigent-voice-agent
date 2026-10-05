@@ -1,3 +1,24 @@
+## Current Tool 2 contract: email-only organizer
+
+Tool 1's inputs, attendee lookup, output and availability behavior are unchanged.
+Tool 2 requires message.call.id and message.call.customer.email supplied by the trusted Vapi integration.
+No caller phone number or phone-call type is required. Caller email must resolve uniquely to an enabled
+Entra user; missing, ambiguous and invalid identities fail closed. The scheduler bearer credential is still required.
+Do not accept organizer identity from model arguments. Authentication's text output does not automatically
+populate customer.email: configure that handoff in Vapi before testing the live flow.
+
+Tool 2 arguments.attendeeEmails is now an array of strings, for example:
+```json
+{"attendeeEmails":["supportassistant@vanigent.com"]}
+```
+Copy emails from Tool 1 meeting.attendees. Other arguments are unchanged: title, date, startTime,
+duration (string), confirmed (exact string "true"), confirmationToken, and optional timeZone,
+description and location. Copy checked details exactly. The existing attendee-slot token remains unchanged;
+organizer identity comes from protected call metadata and all calendars are rechecked before booking.
+Update the Tool 2 schema in Vapi, deploy the scheduler, and use a fresh Tool 1 token for testing.
+
+## Historical implementation notes (superseded where they mention caller phone or comma-separated Tool 2 emails)
+
 ## Tool 2: caller-organized meeting with invitations
 
 POST /api/scheduleMeeting accepts the Vapi tool-calls envelope and the same scheduler bearer credential.

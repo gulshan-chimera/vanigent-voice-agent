@@ -54,10 +54,9 @@ async function fetchNewToken(): Promise<string | null> {
       const data = (await response.json()) as TokenResponse;
 
       if (!response.ok || !data.access_token) {
-        // A bad secret is permanent — retrying won't help, so fail fast.
-        console.error(
-          `[GRAPH-AUTH] Token request rejected: ${data.error} - ${data.error_description}`
-        );
+        // Fail fast without logging the OAuth response body; it can contain
+        // tenant or credential diagnostics.
+        console.error(`[GRAPH-AUTH] Token request rejected with HTTP ${response.status}.`);
         return null;
       }
 

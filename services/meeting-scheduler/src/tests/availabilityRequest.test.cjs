@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const {HttpRequest}=require('@azure/functions');
 const directory=require('../../dist/meeting-scheduler/src/lib/entraUserSearch.js');
 const calendar=require('../../dist/meeting-scheduler/src/lib/calendarAvailability.js');
-const provider=require('../../dist/Knowledge Base/src/lib/graphAuth.js');
+const provider=require('../../dist/meeting-scheduler/src/lib/graphAuth.js');
 const {checkMeetingAvailability}=require('../../dist/meeting-scheduler/src/functions/checkMeetingAvailability.js');
 const saved={find:directory.findAttendeeCandidates,lookup:directory.lookupMeetingCaller,check:calendar.checkParticipantAvailability,fetch:global.fetch,token:provider.getGraphAccessToken,secret:process.env.MEETING_SCHEDULER_SECRET,now:Date.now};
 afterEach(()=>{directory.findAttendeeCandidates=saved.find;directory.lookupMeetingCaller=saved.lookup;calendar.checkParticipantAvailability=saved.check;global.fetch=saved.fetch;provider.getGraphAccessToken=saved.token;Date.now=saved.now;if(saved.secret===undefined)delete process.env.MEETING_SCHEDULER_SECRET;else process.env.MEETING_SCHEDULER_SECRET=saved.secret;});
