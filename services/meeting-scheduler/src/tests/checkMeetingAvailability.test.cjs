@@ -7,7 +7,7 @@ const calendar = require('../../dist/meeting-scheduler/src/lib/calendarAvailabil
 const { handleMeetingTool } = require('../../dist/meeting-scheduler/src/lib/vapiMeetingTool.js');
 const checkMeetingAvailability = (request, context) => handleMeetingTool(request, context, 'check_meeting_availability');
 const { scheduleMeeting } = require('../../dist/meeting-scheduler/src/functions/scheduleMeeting.js');
-const provider = require('../../dist/Knowledge Base/src/lib/graphAuth.js');
+const provider = require('../../dist/meeting-scheduler/src/lib/graphAuth.js');
 const saved = { lookup: directory.lookupMeetingCaller, search: directory.searchEntraUsers, find: directory.findAttendeeCandidates, check: calendar.checkCalendarAvailability, now: Date.now, secret: process.env.MEETING_SCHEDULER_SECRET, fetch: global.fetch, token: provider.getGraphAccessToken };
 afterEach(() => {
   directory.lookupMeetingCaller = saved.lookup; directory.searchEntraUsers = saved.search;
@@ -26,7 +26,7 @@ function setup() {
   process.env.MEETING_SCHEDULER_SECRET = 'test-secret';
   Date.now = () => Date.parse('2030-01-01T00:00:00Z');
   directory.lookupMeetingCaller = async phone => { assert.equal(phone, call.customer.number); return user; };
-  directory.searchEntraUsers = async () => [attendee];
+  directory.searchEntraUsers = async name => name.toLowerCase() === user.email ? [user] : [attendee];
   directory.findAttendeeCandidates = async name => ({ users: await directory.searchEntraUsers(name), exact: true });
   calendar.checkCalendarAvailability = async meeting => { assert.equal(meeting.caller.id, 'caller'); return { status: 'available', requestedSlot: { available: true }, alternatives: [] }; };
 }
@@ -131,7 +131,7 @@ test('both endpoints complete Tool 1 then confirmed Tool 2 with mocked Graph onl
   assert.equal(checked.meeting.title, 'Project review');
   assert.equal(checked.meeting.startTime, '10:00');
   assert.ok(checked.requestedSlot.confirmationToken);
-  const bookingArgs = { title: checked.meeting.title, attendeeEmails: checked.meeting.attendees.map(u => u.email).join(', '),
+  const bookingArgs = { title: checked.meeting.title, attendeeEmails: checked.meeting.attendees.map(u => u.email),
     date: checked.meeting.date, startTime: checked.meeting.startTime, timeZone: checked.meeting.timeZone,
     duration: String(checked.meeting.durationMinutes), confirmed: 'true', confirmationToken: checked.requestedSlot.confirmationToken };
   provider.getGraphAccessToken = async () => 'fake-token';
@@ -152,7 +152,7 @@ test('both endpoints complete Tool 1 then confirmed Tool 2 with mocked Graph onl
 test('Tool 2 refuses unconfirmed input and an expired or altered booking reference', async () => {
   setup();
   const checked = result(await checkMeetingAvailability(request(), context));
-  const bookingArgs = { title: args.title, attendeeEmails: attendee.email, date: args.date, startTime: args.startTime,
+  const bookingArgs = { title: args.title, attendeeEmails: [attendee.email], date: args.date, startTime: args.startTime,
     timeZone: args.timeZone, duration: '30', confirmed: 'true', confirmationToken: checked.requestedSlot.confirmationToken };
   global.fetch = async () => assert.fail('must not reach Graph');
   for (const changes of [{ confirmed: 'false' }, { title: 'Different meeting' }, { confirmationToken: 'fake' }]) {

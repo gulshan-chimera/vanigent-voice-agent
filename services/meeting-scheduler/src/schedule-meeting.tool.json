@@ -3,7 +3,7 @@
   "async": false,
   "function": {
     "name": "schedule_meeting",
-    "description": "Creates the Microsoft 365 event and sends attendee invitations ONLY after the caller confirms the final title, attendees, date, time and duration. First run check_meeting_availability and read back the selected free slot. Use its exact date, startTime and confirmationToken. An initial request to schedule a meeting starts Tool 1, not this tool. Retry an uncertain creation with the identical arguments and call ID. New meetings request a Microsoft Teams link. Use event.joinUrl when returned; never invent a link, meeting ID, or passcode. If meetingLinkStatus is unavailable, report that the event exists but its Teams link was not returned. Include location only when supplied by the caller.",
+    "description": "Creates the Microsoft 365 event and sends attendee invitations ONLY after the caller confirms the final title, attendees, date, time and duration. First run check_meeting_availability and read back the selected free slot. Use its exact date, startTime and confirmationToken. An initial request to schedule a meeting starts Tool 1, not this tool. Retry an uncertain creation with the identical arguments and call ID. New meetings request a Microsoft Teams link. Use event.joinUrl when returned; never invent a link, meeting ID, or passcode. If meetingLinkStatus is unavailable, report that the event exists but its Teams link was not returned. Include location only when supplied by the caller. Organizer email must be supplied by the trusted integration in message.call.customer.email, outside tool arguments. No caller phone number is required. Copy the exact checked title, location and description; do not add new details.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
@@ -22,8 +22,15 @@
           "description": "Exact meeting title confirmed and checked by Tool 1."
         },
         "attendeeEmails": {
-          "type": "string",
-          "description": "Comma-separated confirmed directory emails returned by Tool 1. Do not include the organizer."
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 19,
+          "items": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 256
+          },
+          "description": "Copy the attendee email strings from Tool 1 meeting.attendees into this array. Exclude the organizer. Do not invent addresses."
         },
         "date": {
           "type": "string",

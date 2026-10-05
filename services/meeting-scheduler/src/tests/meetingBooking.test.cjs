@@ -1,6 +1,6 @@
 const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const provider = require('../../dist/Knowledge Base/src/lib/graphAuth.js');
+const provider = require('../../dist/meeting-scheduler/src/lib/graphAuth.js');
 const calendar = require('../../dist/meeting-scheduler/src/lib/calendarAvailability.js');
 const { issueConfirmation, createConfirmedMeeting } = require('../../dist/meeting-scheduler/src/lib/meetingBooking.js');
 const saved = { fetch: global.fetch, token: provider.getGraphAccessToken, check: calendar.checkCalendarAvailability, now: Date.now, secret: process.env.MEETING_SCHEDULER_SECRET };

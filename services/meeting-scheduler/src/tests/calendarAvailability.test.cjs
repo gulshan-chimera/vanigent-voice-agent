@@ -1,6 +1,6 @@
 const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const provider = require('../../dist/Knowledge Base/src/lib/graphAuth.js');
+const provider = require('../../dist/meeting-scheduler/src/lib/graphAuth.js');
 const { checkCalendarAvailability, validateRequestedTime } = require('../../dist/meeting-scheduler/src/lib/calendarAvailability.js');
 const originalFetch = global.fetch;
 const originalToken = provider.getGraphAccessToken;

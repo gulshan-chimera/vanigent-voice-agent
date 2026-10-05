@@ -1,6 +1,6 @@
 const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const provider = require('../../dist/Knowledge Base/src/lib/graphAuth.js');
+const provider = require('../../dist/meeting-scheduler/src/lib/graphAuth.js');
 const { searchEntraUsers, EntraUserSearchError } = require('../../dist/meeting-scheduler/src/lib/entraUserSearch.js');
 
 const originalFetch = global.fetch;
