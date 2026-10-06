@@ -10,7 +10,7 @@ function object(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-/** Email must come from credential-protected Vapi metadata, never model tool arguments. */
+/** Resolve the organizer email supplied in Tool 2 against an enabled Entra user. */
 async function resolveCallerEmail(value: unknown) {
   if (typeof value !== "string" || value.length > 256 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value.trim())) return null;
   const email = value.trim().toLowerCase();
@@ -45,7 +45,6 @@ export async function handleMeetingTool(request: HttpRequest, context: Invocatio
   }
   const metadata = object(message.call);
   const phone = object(metadata?.customer)?.number;
-  const callerEmail = object(metadata?.customer)?.email;
   let callerPromise: ReturnType<typeof lookupMeetingCaller> | undefined;
   const results = [];
   for (const rawCall of calls) {
@@ -69,13 +68,13 @@ export async function handleMeetingTool(request: HttpRequest, context: Invocatio
         }
         if (typeof metadata?.id !== "string" || !metadata.id.trim() ||
             (!booking && (typeof phone !== "string" || !["inboundPhoneCall", "outboundPhoneCall"].includes(String(metadata.type))))) {
-          result = { status: "caller_unverified", message: booking ? "Supply a stable message.call.id and authenticated caller email in message.call.customer.email." : "A phone call with a verifiable caller number is required. Attendee phone numbers are not needed." };
+          result = { status: "caller_unverified", message: booking ? "Supply a stable message.call.id." : "A phone call with a verifiable caller number is required. Attendee phone numbers are not needed." };
         } else {
-          // The protected call metadata, not model arguments, identifies the organizer.
-          callerPromise ??= booking ? resolveCallerEmail(callerEmail) : lookupMeetingCaller(phone as string);
-          const caller = await callerPromise;
+          const caller = booking
+            ? await resolveCallerEmail(args.callerEmail)
+            : await (callerPromise ??= lookupMeetingCaller(phone as string));
           if (!caller) {
-            result = { status: "caller_unverified", message: "Could not uniquely resolve an enabled caller from message.call.customer.email. Vapi must supply the authenticated caller email in call metadata." };
+            result = { status: "caller_unverified", message: "callerEmail must uniquely identify an enabled Entra user." };
           } else {
             const preparation = await prepareMeetingDetails(caller, parsed, !booking);
             if (preparation.status === "needs_attendee_clarification") {

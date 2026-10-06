@@ -47,7 +47,7 @@ test('DST nonexistent and repeated local times ask for clarification, normal tim
   assert.equal(parseMeetingInput({ ...input, date: '2030-03-10', startTime: '03:30', timeZone: 'America/New_York' }, false, now).startDateTime, '2030-03-10T07:30:00.000Z');
 });
 test('booking uses confirmed emails and absolute date to prevent relative-date drift on retries', () => {
-  const booking = { title: input.title, attendeeEmails: ['sneha@example.com'], date: '2030-01-08', startTime: '15:00', duration: '30', confirmed: 'true', confirmationToken: 'token' };
+  const booking = { title: input.title, attendeeEmails: ['sneha@example.com'], callerEmail: 'caller@example.com', date: '2030-01-08', startTime: '15:00', duration: '30', confirmed: 'true', confirmationToken: 'token' };
   assert.equal(parseMeetingInput(booking, true, now).attendeeNames[0], 'sneha@example.com');
   assert.throws(() => parseMeetingInput({ ...booking, date: 'tomorrow' }, true, now), { code: 'INVALID_TIME' });
   assert.throws(() => parseMeetingInput({ ...booking, attendeeEmails: 'Sneha' }, true, now), { code: 'INVALID_TIME' });
