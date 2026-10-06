@@ -32,19 +32,18 @@ export function issueConfirmation(callId: string, meeting: MeetingDetails, start
   return `${payload}.${signature(payload)}`;
 }
 
-// Tool 1 checks attendees without a caller; Tool 2 independently verifies the organizer
-// and rechecks all calendars. This token attests only to the checked meeting details.
-function availabilityKey(meeting: Pick<MeetingDetails, "title" | "location" | "description" | "attendees" | "durationMinutes">, start: string): string {
+// Tool 1 checks the caller and attendees. The token binds that organizer and the exact checked meeting.
+function availabilityKey(meeting: Pick<MeetingDetails, "caller" | "title" | "location" | "description" | "attendees" | "durationMinutes">, start: string): string {
   return createHash("sha256").update(JSON.stringify([
-    "attendee-availability-v1", process.env.TENANT_ID ?? "", meeting.title,
+    "participant-availability-v2", process.env.TENANT_ID ?? "", meeting.caller.id, meeting.caller.email.toLowerCase(), meeting.title,
     new Date(start).toISOString(), meeting.durationMinutes,
     meeting.attendees.map(user => user.id + ":" + user.email.toLowerCase()).sort(),
     ...(meeting.description ? [meeting.description] : []),
     ...(meeting.location ? [{ location: meeting.location }] : []),
   ])).digest("hex");
 }
-export function issueAvailabilityConfirmation(meeting: Pick<MeetingDetails, "title" | "location" | "description" | "attendees" | "durationMinutes">, start: string): string {
-  const payload = Buffer.from(JSON.stringify({ purpose: "attendee-availability-v1", key: availabilityKey(meeting, start), expires: Date.now() + 15 * 60_000 })).toString("base64url");
+export function issueAvailabilityConfirmation(meeting: Pick<MeetingDetails, "caller" | "title" | "location" | "description" | "attendees" | "durationMinutes">, start: string): string {
+  const payload = Buffer.from(JSON.stringify({ purpose: "participant-availability-v2", key: availabilityKey(meeting, start), expires: Date.now() + 15 * 60_000 })).toString("base64url");
   return payload + "." + signature(payload);
 }
 
@@ -59,7 +58,7 @@ function verifyConfirmation(callId: string, meeting: MeetingDetails, startDateTi
   let payload: { key?: unknown; expires?: unknown; purpose?: unknown };
   try { payload = JSON.parse(Buffer.from(pieces[0], "base64url").toString("utf8")); } catch { throw failure(); }
   const key = bookingKey(callId, meeting, startDateTime);
-  const expectedKey = payload?.purpose === "attendee-availability-v1" ? availabilityKey(meeting, startDateTime) : key;
+  const expectedKey = payload?.purpose === "participant-availability-v2" ? availabilityKey(meeting, startDateTime) : key;
   if (!payload || payload.key !== expectedKey || typeof payload.expires !== "number" || !Number.isFinite(payload.expires) || payload.expires <= Date.now()) throw failure();
   return key;
 }

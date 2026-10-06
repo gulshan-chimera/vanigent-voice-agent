@@ -1,7 +1,7 @@
 import { issueAvailabilityConfirmation } from "./meetingBooking";
 import { HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { timingSafeEqual } from "node:crypto";
-import { findAttendeeCandidates, EntraUserSearchError } from "./entraUserSearch";
+import { findAttendeeCandidates, resolveEnabledUserByEmail, EntraUserSearchError } from "./entraUserSearch";
 import { AvailabilityError, checkParticipantAvailability } from "./calendarAvailability";
 import { parseMeetingInput } from "./meetingTime";
 import { EntraUser } from "../types/entraUser";
@@ -12,8 +12,8 @@ function invalid(message: string): never { throw new EntraUserSearchError("INVAL
 async function check(input: unknown) {
   const args = object(input);
   if (!args) return invalid("Provide meeting details as a JSON object.");
-  const allowed = ["location", "description", "title", "attendees", "date", "time", "startTime", "duration", "durationMinutes", "timeZone"];
-  if (Object.keys(args).some(key => !allowed.includes(key))) return invalid("Use title, attendees, date, time, durationMinutes and optional timeZone. No caller identity or phone number is required.");
+  const allowed = ["callerEmail", "location", "description", "title", "attendees", "date", "time", "startTime", "duration", "durationMinutes", "timeZone"];
+  if (Object.keys(args).some(key => !allowed.includes(key))) return invalid("Use callerEmail, title, attendees, date, time, durationMinutes and optional timeZone, description and location.");
   if ((args.time !== undefined && args.startTime !== undefined) || (args.duration !== undefined && args.durationMinutes !== undefined)) return invalid("Supply one time field and one duration field.");
   if (args.durationMinutes !== undefined && !Number.isInteger(args.durationMinutes)) return invalid("durationMinutes must be an integer.");
   if (args.duration !== undefined && typeof args.duration !== "string" && !Number.isInteger(args.duration)) return invalid("duration must be a string or integer number of minutes.");
@@ -26,6 +26,8 @@ async function check(input: unknown) {
     duration: typeof duration === "number" ? String(duration) : duration, timeZone: args.timeZone });
   const names = array ? (args.attendees as string[]).map(name => name.trim()) : parsed.attendeeNames;
   const unique = new Map(names.map(name => [name.toLowerCase(), name]));
+  const caller = await resolveEnabledUserByEmail(args.callerEmail);
+  if (!caller) return invalid("callerEmail must uniquely identify an enabled Entra user.");
   const users = new Map<string, EntraUser>();
   const unresolved = [];
   for (const [key, name] of unique) {
@@ -42,14 +44,16 @@ async function check(input: unknown) {
     startDateTime: parsed.startDateTime, endDateTime: parsed.endDateTime };
   if (unresolved.length) return { status: "needs_attendee_clarification", attendees: unresolved, meeting: details,
     message: "Clarify the attendee names and retry with the selected directory email. Calendars have not been checked." };
-  const participants = [...users.values()];
+  const attendees = [...users.values()].filter(user => user.id !== caller.id);
+  const participants = [caller, ...attendees];
   const availability = await checkParticipantAvailability(participants, parsed, parsed.startDateTime);
-  const checked = { title: parsed.title, ...(parsed.location ? { location: parsed.location } : {}), ...(parsed.description ? { description: parsed.description } : {}), attendees: participants, durationMinutes: parsed.durationMinutes };
+  const checked = { caller, title: parsed.title, ...(parsed.location ? { location: parsed.location } : {}), ...(parsed.description ? { description: parsed.description } : {}), attendees, durationMinutes: parsed.durationMinutes };
   return { ...availability,
     requestedSlot: { ...availability.requestedSlot, ...(availability.requestedSlot.available ? { confirmationToken: issueAvailabilityConfirmation(checked, parsed.startDateTime) } : {}) },
     alternatives: availability.alternatives.map(slot => ({ ...slot, confirmationToken: issueAvailabilityConfirmation(checked, slot.startDateTime) })),
-    confirmationExpiresInMinutes: 15, scope: "listed_attendees", meeting: { ...details,
-    attendees: participants.map(user => ({ displayName: user.displayName, email: user.email })) } };
+    confirmationExpiresInMinutes: 15, scope: "caller_and_listed_attendees", meeting: { ...details,
+    organizer: { displayName: caller.displayName, email: caller.email },
+    attendees: attendees.map(user => ({ displayName: user.displayName, email: user.email })) } };
 }
 export async function handleAvailability(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   const secret = process.env.MEETING_SCHEDULER_SECRET;
