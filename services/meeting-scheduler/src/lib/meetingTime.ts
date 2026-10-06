@@ -80,11 +80,14 @@ export function parseMeetingInput(args: Record<string, unknown>, booking = false
     args = { ...args, attendeeEmails: emails.map(email => (email as string).trim()).join(",") };
   }
   const attendeeField = booking ? "attendeeEmails" : "attendees";
-  const required = ["title", attendeeField, "date", "startTime", "duration"];
+  const required = ["title", attendeeField, "date", "startTime", "duration", ...(booking ? ["callerEmail"] : [])];
   const allowed = [...required, "timeZone", "description", "location", ...(booking ? ["confirmed", "confirmationToken"] : [])];
   if (Object.keys(args).some(key => !allowed.includes(key)) || required.some(key => typeof args[key] !== "string" || !(args[key] as string).trim()) ||
       (args.timeZone !== undefined && (typeof args.timeZone !== "string" || !args.timeZone.trim()))) {
-    return invalid(`Provide ${required.join(", ")} as nonempty strings. Optional timeZone must also be a string. Caller identity and attendee phone numbers are not tool arguments.`);
+    return invalid(`Provide ${required.join(", ")} as nonempty strings. Optional timeZone must also be a string. Attendee phone numbers are not tool arguments.`);
+  }
+  if (booking && ((args.callerEmail as string).length > 256 || !/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test((args.callerEmail as string).trim()))) {
+    return invalid("Tool 2 requires callerEmail as a valid email address.");
   }
   if (args.description !== undefined && (typeof args.description !== "string" || args.description.length > 5000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(args.description))) return invalid("Description must be plain text of at most 5000 characters.");
   if (args.location !== undefined && (typeof args.location !== "string" || args.location.length > 256 || /[\u0000-\u001f]/.test(args.location))) return invalid("Location must be text of at most 256 characters without control characters.");

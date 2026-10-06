@@ -131,7 +131,7 @@ test('both endpoints complete Tool 1 then confirmed Tool 2 with mocked Graph onl
   assert.equal(checked.meeting.title, 'Project review');
   assert.equal(checked.meeting.startTime, '10:00');
   assert.ok(checked.requestedSlot.confirmationToken);
-  const bookingArgs = { title: checked.meeting.title, attendeeEmails: checked.meeting.attendees.map(u => u.email),
+  const bookingArgs = { title: checked.meeting.title, attendeeEmails: checked.meeting.attendees.map(u => u.email), callerEmail: user.email,
     date: checked.meeting.date, startTime: checked.meeting.startTime, timeZone: checked.meeting.timeZone,
     duration: String(checked.meeting.durationMinutes), confirmed: 'true', confirmationToken: checked.requestedSlot.confirmationToken };
   provider.getGraphAccessToken = async () => 'fake-token';
@@ -152,7 +152,7 @@ test('both endpoints complete Tool 1 then confirmed Tool 2 with mocked Graph onl
 test('Tool 2 refuses unconfirmed input and an expired or altered booking reference', async () => {
   setup();
   const checked = result(await checkMeetingAvailability(request(), context));
-  const bookingArgs = { title: args.title, attendeeEmails: [attendee.email], date: args.date, startTime: args.startTime,
+  const bookingArgs = { title: args.title, attendeeEmails: [attendee.email], callerEmail: user.email, date: args.date, startTime: args.startTime,
     timeZone: args.timeZone, duration: '30', confirmed: 'true', confirmationToken: checked.requestedSlot.confirmationToken };
   global.fetch = async () => assert.fail('must not reach Graph');
   for (const changes of [{ confirmed: 'false' }, { title: 'Different meeting' }, { confirmationToken: 'fake' }]) {

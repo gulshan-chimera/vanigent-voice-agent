@@ -1,36 +1,33 @@
 ## Current Tool 2 contract: email-only organizer
 
 Tool 1's inputs, attendee lookup, output and availability behavior are unchanged.
-Tool 2 requires message.call.id and message.call.customer.email supplied by the trusted Vapi integration.
-No caller phone number or phone-call type is required. Caller email must resolve uniquely to an enabled
+Tool 2 requires message.call.id and a callerEmail argument.
+No caller phone number, phone-call type or message.call.customer.email is required. callerEmail must resolve uniquely to an enabled
 Entra user; missing, ambiguous and invalid identities fail closed. The scheduler bearer credential is still required.
-Do not accept organizer identity from model arguments. Authentication's text output does not automatically
-populate customer.email: configure that handoff in Vapi before testing the live flow.
 
 Tool 2 arguments.attendeeEmails is now an array of strings, for example:
 ```json
-{"attendeeEmails":["supportassistant@vanigent.com"]}
+{"attendeeEmails":["supportassistant@vanigent.com"],"callerEmail":"askaidev@vanigent.com"}
 ```
-Copy emails from Tool 1 meeting.attendees. Other arguments are unchanged: title, date, startTime,
+Copy attendee emails from Tool 1 meeting.attendees and supply the authenticated caller email in callerEmail. Other arguments are unchanged: title, date, startTime,
 duration (string), confirmed (exact string "true"), confirmationToken, and optional timeZone,
 description and location. Copy checked details exactly. The existing attendee-slot token remains unchanged;
-organizer identity comes from protected call metadata and all calendars are rechecked before booking.
+organizer identity comes from callerEmail and all calendars are rechecked before booking.
 Update the Tool 2 schema in Vapi, deploy the scheduler, and use a fresh Tool 1 token for testing.
 
-## Historical implementation notes (superseded where they mention caller phone or comma-separated Tool 2 emails)
+## Meeting scheduling behavior
 
 ## Tool 2: caller-organized meeting with invitations
 
 POST /api/scheduleMeeting accepts the Vapi tool-calls envelope and the same scheduler bearer credential.
-Vapi must supply message.call.id, message.call.type (inboundPhoneCall or outboundPhoneCall),
-message.call.customer.number (E.164) and message.call.customer.email from the caller context.
-These field names are the scheduler integration contract; configure Vapi to supply them.
-The phone is resolved in Entra and the supplied email must match its enabled user. Caller identity cannot be set in tool arguments.
+Vapi must supply message.call.id for retry protection. Tool 2 receives callerEmail in its arguments,
+resolves that email in Entra and uses the enabled directory user as organizer.
 Authentication and Knowledge Base are unchanged.
 
 After Tool 1, read back the selected free slot and get explicit confirmation. Call schedule_meeting with:
 - title: exact confirmed title
-- attendeeEmails: comma-separated directory emails from Tool 1 (exclude the organizer)
+- attendeeEmails: array of directory email strings from Tool 1 (exclude the organizer)
+- callerEmail: authenticated caller email used to resolve the organizer
 - date and startTime: the selected slot's absolute local date and HH:mm
 - timeZone and duration: the selected slot's timezone and duration (string, e.g. "30")
 - confirmed: "true"
@@ -39,7 +36,7 @@ After Tool 1, read back the selected free slot and get explicit confirmation. Ca
 Tool 1 checks listed attendees only. For booking, leave the caller out of its attendee list;
 Tool 2 verifies the caller and rechecks everyone's availability, including the caller.
 The selected-slot token attests to title, directory attendee identities, time and duration, not caller authentication.
-Tool 2's protected Vapi caller context supplies organizer identity. Do not expose the scheduler bearer credential to untrusted clients.
+Tool 2's callerEmail argument supplies organizer identity and is validated in Entra. Do not expose the scheduler bearer credential to untrusted clients.
 
 Tool 2 posts one event to the caller's /users/{id}/events with attendees and UTC start/end.
 Microsoft 365 sends invitations; attendee acceptance/calendar processing and delivery are not guaranteed by this API response.
@@ -171,7 +168,7 @@ Postman: Tool 2
 
 `POST http://localhost:7071/api/scheduleMeeting`
 
-Use the same headers and call metadata, including the SAME call ID. Replace
+Use the same headers and the SAME call ID. Replace
 `toolCallList` in the envelope with the following, using values from the selected
 Tool 1 slot and verified attendee emails:
 
@@ -181,7 +178,8 @@ Tool 1 slot and verified attendee emails:
   "name": "schedule_meeting",
   "arguments": {
     "title": "Project review",
-    "attendeeEmails": "sneha@company.com, john@company.com",
+    "attendeeEmails": ["sneha@company.com", "john@company.com"],
+    "callerEmail": "caller@company.com",
     "date": "2030-01-08",
     "startTime": "15:00",
     "duration": "30 minutes",
@@ -194,8 +192,8 @@ Tool 1 slot and verified attendee emails:
 
 Use the actual selected YYYY-MM-DD date, not the illustrative date above and not
 relative wording. `confirmed` is the string `true` and must only be sent after
-explicit caller confirmation. The signed token binds the exact meeting, call and
-organizer; changed or expired details require another Tool 1 check. The assistant
+explicit caller confirmation. The signed token binds the checked meeting details;
+changed or expired details require another Tool 1 check. Tool 2 validates callerEmail independently. The assistant
 is responsible for obtaining conversational confirmation; the flag does not
 independently prove what the caller said.
 
