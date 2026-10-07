@@ -8,6 +8,14 @@ function invalid(message: string): never {
   throw new AvailabilityError("INVALID_TIME", message);
 }
 
+/** Capitalize each title word without lowercasing existing acronyms such as AI. */
+function formatMeetingTitle(value: string): string {
+  return value.replace(
+    /(^|[\s\-\u2013\u2014/])(\p{L})/gu,
+    (_match, separator: string, letter: string) => separator + letter.toLocaleUpperCase(),
+  );
+}
+
 function parseDate(value: string, timeZone: string, now: number): string {
   const date = value.trim().toLowerCase().replace(/\s+/g, " ");
   const today = zonedParts(now, timeZone).date;
@@ -93,7 +101,7 @@ export function parseMeetingInput(args: Record<string, unknown>, booking = false
   if (args.location !== undefined && (typeof args.location !== "string" || args.location.length > 256 || /[\u0000-\u001f]/.test(args.location))) return invalid("Location must be text of at most 256 characters without control characters.");
   const location = typeof args.location === "string" ? args.location.trim() || undefined : undefined;
   const description = typeof args.description === "string" ? args.description.trim() || undefined : undefined;
-  const title = (args.title as string).trim();
+  const title = formatMeetingTitle((args.title as string).trim());
   if (title.length > 200 || /[\u0000-\u001f]/.test(title)) return invalid("Use a meeting title of 1–200 characters without control characters.");
   const rawNames = args[attendeeField] as string;
   if (rawNames.length > 5000) return invalid("Too many attendee details.");
