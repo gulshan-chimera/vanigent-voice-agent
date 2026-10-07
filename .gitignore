@@ -41,3 +41,5 @@ HR Agent/
 # Delta sync state (local per-machine)
 .sync-state.json
 transfer-captures/
+# MCP server config (per-developer; see Claude Code MCP setup guide)
+.mcp.json
