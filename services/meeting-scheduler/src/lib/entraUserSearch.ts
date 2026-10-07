@@ -80,6 +80,17 @@ export async function searchEntraUsers(name: string): Promise<EntraUser[]> {
   return queryUsers(`accountEnabled eq true and ${match}`);
 }
 
+/** Resolve one enabled directory user whose mail or UPN exactly matches the supplied email. */
+export async function resolveEnabledUserByEmail(value: unknown): Promise<EntraUser | null> {
+  if (typeof value !== "string" || value.length > 256 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value.trim())) return null;
+  const email = value.trim().toLowerCase();
+  const candidates = await searchEntraUsers(email);
+  if (candidates.length !== 1) return null;
+  const user = candidates[0];
+  return user.accountEnabled === true && !!user.id && !!user.email &&
+    [user.email, user.userPrincipalName].some(address => address?.toLowerCase() === email) ? user : null;
+}
+
 /** Resolve only the phone supplied in authenticated Vapi call metadata. */
 export async function lookupMeetingCaller(phone: string): Promise<EntraUser | null> {
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) return null;

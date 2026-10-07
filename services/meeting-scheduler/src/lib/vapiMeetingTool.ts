@@ -1,6 +1,6 @@
 import { HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { timingSafeEqual } from "node:crypto";
-import { lookupMeetingCaller, searchEntraUsers, EntraUserSearchError } from "./entraUserSearch";
+import { lookupMeetingCaller, resolveEnabledUserByEmail, EntraUserSearchError } from "./entraUserSearch";
 import { prepareMeetingDetails } from "./meetingDetails";
 import { AvailabilityError, checkCalendarAvailability } from "./calendarAvailability";
 import { parseMeetingInput } from "./meetingTime";
@@ -8,17 +8,6 @@ import { BookingError, createConfirmedMeeting, issueConfirmation } from "./meeti
 
 function object(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
-
-/** Resolve the organizer email supplied in Tool 2 against an enabled Entra user. */
-async function resolveCallerEmail(value: unknown) {
-  if (typeof value !== "string" || value.length > 256 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value.trim())) return null;
-  const email = value.trim().toLowerCase();
-  const candidates = await searchEntraUsers(email);
-  if (candidates.length !== 1) return null;
-  const user = candidates[0];
-  return user.accountEnabled === true && user.id && user.email &&
-    [user.email, user.userPrincipalName].some(address => address?.toLowerCase() === email) ? user : null;
 }
 
 function authorized(request: HttpRequest): boolean {
@@ -71,7 +60,7 @@ export async function handleMeetingTool(request: HttpRequest, context: Invocatio
           result = { status: "caller_unverified", message: booking ? "Supply a stable message.call.id." : "A phone call with a verifiable caller number is required. Attendee phone numbers are not needed." };
         } else {
           const caller = booking
-            ? await resolveCallerEmail(args.callerEmail)
+            ? await resolveEnabledUserByEmail(args.callerEmail)
             : await (callerPromise ??= lookupMeetingCaller(phone as string));
           if (!caller) {
             result = { status: "caller_unverified", message: "callerEmail must uniquely identify an enabled Entra user." };

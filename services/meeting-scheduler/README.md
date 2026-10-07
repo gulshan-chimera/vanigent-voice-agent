@@ -1,6 +1,6 @@
 ## Current Tool 2 contract: email-only organizer
 
-Tool 1's inputs, attendee lookup, output and availability behavior are unchanged.
+Tool 1 now requires callerEmail, resolves it to one enabled Entra user, and checks the caller together with all listed attendees.
 Tool 2 requires message.call.id and a callerEmail argument.
 No caller phone number, phone-call type or message.call.customer.email is required. callerEmail must resolve uniquely to an enabled
 Entra user; missing, ambiguous and invalid identities fail closed. The scheduler bearer credential is still required.
@@ -11,9 +11,9 @@ Tool 2 arguments.attendeeEmails is now an array of strings, for example:
 ```
 Copy attendee emails from Tool 1 meeting.attendees and supply the authenticated caller email in callerEmail. Other arguments are unchanged: title, date, startTime,
 duration (string), confirmed (exact string "true"), confirmationToken, and optional timeZone,
-description and location. Copy checked details exactly. The existing attendee-slot token remains unchanged;
-organizer identity comes from callerEmail and all calendars are rechecked before booking.
-Update the Tool 2 schema in Vapi, deploy the scheduler, and use a fresh Tool 1 token for testing.
+description and location. Copy checked details exactly. The selected-slot token binds the caller and exact checked meeting;
+all calendars are rechecked before booking.
+Update both Vapi tool schemas, deploy the scheduler, and use a fresh Tool 1 token for testing.
 
 ## Meeting scheduling behavior
 
@@ -33,9 +33,9 @@ After Tool 1, read back the selected free slot and get explicit confirmation. Ca
 - confirmed: "true"
 - confirmationToken: the selected slot's token
 
-Tool 1 checks listed attendees only. For booking, leave the caller out of its attendee list;
-Tool 2 verifies the caller and rechecks everyone's availability, including the caller.
-The selected-slot token attests to title, directory attendee identities, time and duration, not caller authentication.
+Tool 1 validates callerEmail and checks the caller with every listed attendee. Leave the caller out of the attendees list.
+Tool 2 verifies the same caller and rechecks everyone's availability before creation.
+The selected-slot token binds the organizer, title, directory attendee identities, time, duration, description and location.
 Tool 2's callerEmail argument supplies organizer identity and is validated in Entra. Do not expose the scheduler bearer credential to untrusted clients.
 
 Tool 2 posts one event to the caller's /users/{id}/events with attendees and UTC start/end.
@@ -119,25 +119,23 @@ Headers: `Content-Type: application/json` and
       "id": "check-001",
       "name": "check_meeting_availability",
       "arguments": {
+        "callerEmail": "caller@company.com",
         "title": "Project review",
-        "attendees": "Sneha Rao, John Smith",
+        "attendees": ["Sneha Rao", "John Smith"],
         "date": "tomorrow",
-        "startTime": "15:00",
-        "duration": "30 minutes"
+        "time": "15:00",
+        "timeZone": "America/New_York",
+        "durationMinutes": 30
       }
     }]
   }
 }
 ```
 
-Replace the example caller number with the actual organizer's Entra phone number
-and names with real directory users. The phone identifies the caller from the
-credential-protected Vapi metadata; attendee phone numbers are never needed.
-Tool arguments cannot choose the organizer. Phone-based identification is the
-existing project's assurance model, not Microsoft SSO or proof against caller-ID
-spoofing. Web calls are not supported without a separate trusted identity flow.
+Replace callerEmail with the authenticated caller email supplied by Vapi and names
+with real directory users. No caller or attendee phone number is needed.
 
-All meeting inputs above are strings. Separate attendees with commas. Exact names
+Attendees are an array of strings and durationMinutes is an integer. Exact names
 are checked first; ambiguous or fuzzy matches return names, emails, job titles
 and departments. Ask the caller to select a candidate, even when only one fuzzy
 suggestion exists, and retry Tool 1 with its directory email. The bounded fuzzy
