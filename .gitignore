@@ -42,3 +42,5 @@ HR Agent/
 .sync-state.json
 transfer-captures/
 tests
+# MCP server config (per-developer; see Claude Code MCP setup guide)
+.mcp.json
