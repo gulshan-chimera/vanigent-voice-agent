@@ -27,7 +27,9 @@ async function fetchNewToken(): Promise<string | null> {
   const clientSecret = process.env.CLIENT_SECRET;
 
   if (!tenantId || !clientId || !clientSecret) {
-    console.error("[GRAPH-AUTH] Missing TENANT_ID, CLIENT_ID, or CLIENT_SECRET.");
+    console.error(
+      "[GRAPH-AUTH] Missing TENANT_ID, CLIENT_ID, or CLIENT_SECRET.",
+    );
     return null;
   }
 
@@ -56,7 +58,9 @@ async function fetchNewToken(): Promise<string | null> {
       if (!response.ok || !data.access_token) {
         // Fail fast without logging the OAuth response body; it can contain
         // tenant or credential diagnostics.
-        console.error(`[GRAPH-AUTH] Token request rejected with HTTP ${response.status}.`);
+        console.error(
+          `[GRAPH-AUTH] Token request rejected with HTTP ${response.status}.`,
+        );
         return null;
       }
 
@@ -67,7 +71,7 @@ async function fetchNewToken(): Promise<string | null> {
       };
 
       console.log(
-        `[GRAPH-AUTH] New token acquired, valid for ${Math.round(expiresInMs / 60000)} minute(s).`
+        `[GRAPH-AUTH] New token acquired, valid for ${Math.round(expiresInMs / 60000)} minute(s).`,
       );
       return data.access_token;
     } catch (error) {
@@ -75,14 +79,14 @@ async function fetchNewToken(): Promise<string | null> {
 
       if (attempt === MAX_ATTEMPTS) {
         console.error(
-          `[GRAPH-AUTH] Network error after ${MAX_ATTEMPTS} attempts: ${message}`
+          `[GRAPH-AUTH] Network error after ${MAX_ATTEMPTS} attempts: ${message}`,
         );
         return null;
       }
 
       const waitMs = 1000 * Math.pow(2, attempt - 1); // 1s, 2s
       console.warn(
-        `[GRAPH-AUTH] Network error (attempt ${attempt}/${MAX_ATTEMPTS}): ${message} — retrying in ${waitMs / 1000}s.`
+        `[GRAPH-AUTH] Network error (attempt ${attempt}/${MAX_ATTEMPTS}): ${message} — retrying in ${waitMs / 1000}s.`,
       );
       await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
