@@ -34,7 +34,10 @@ export interface ParsedMeetingInput {
 }
 
 export type MeetingPreparationResult =
-  | { status: "needs_details"; fields: (keyof MeetingDetailsInput | "caller")[] }
+  | {
+      status: "needs_details";
+      fields: (keyof MeetingDetailsInput | "caller")[];
+    }
   | {
       status: "needs_attendee_clarification";
       attendees: { name: string; candidates: EntraUser[] }[];
