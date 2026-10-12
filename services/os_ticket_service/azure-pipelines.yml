@@ -22,10 +22,10 @@ pool:
 variables:
   nodeVersion: '24.x'
   azureSubscription: 'Ask-Vanigent-Dev'
-  ${{ if (eq(variables['Build.SourceBranch'], 'refs/heads/develop2')) }}:
+  ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/develop2') }}:
     functionAppName: 'vanigent-ai-osticket-dev'
     adoEnvironment: 'vanigent-dev'
-  ${{ elseif (eq(variables['Build.SourceBranch'], 'refs/heads/release2')) }}:
+  ${{ elseif eq(variables['Build.SourceBranch'], 'refs/heads/release2') }}:
     functionAppName: 'vanigent-ai-osticket-uat'
     adoEnvironment: 'vanigent-uat'
   ${{ else }}:
