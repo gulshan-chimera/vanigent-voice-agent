@@ -1,0 +1,94 @@
+trigger:
+  branches:
+    include:
+      - develop2
+      - release2
+  paths:
+    include:
+      - services/os_ticket_service/*
+
+pr:
+  branches:
+    include:
+      - develop2
+      - release2
+  paths:
+    include:
+      - services/os_ticket_service/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  nodeVersion: '24.x'
+  azureSubscription: 'Ask-Vanigent-Dev'
+  ${{ if (eq(variables['Build.SourceBranch'], 'refs/heads/develop2')) }}:
+    functionAppName: 'vanigent-ai-osticket-dev'
+    adoEnvironment: 'vanigent-dev'
+  ${{ elseif (eq(variables['Build.SourceBranch'], 'refs/heads/release2')) }}:
+    functionAppName: 'vanigent-ai-osticket-uat'
+    adoEnvironment: 'vanigent-uat'
+  ${{ else }}:
+    functionAppName: 'vanigent-ai-osticket-dev'
+    adoEnvironment: 'vanigent-dev'
+
+stages:
+  - stage: Build_And_Test
+    displayName: 'Build Os Ticket Service'
+    jobs:
+      - job: Build
+        displayName: 'Build Os Ticket Service'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '$(nodeVersion)'
+            displayName: 'Install Node.js'
+
+          - script: |
+              npm ci
+              npm run build
+            workingDirectory: 'services/os_ticket_service'
+            displayName: 'Install and Build'
+
+          - script: |
+              npm prune --production
+            workingDirectory: 'services/os_ticket_service'
+            displayName: 'Prune dev dependencies'
+
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: 'services/os_ticket_service'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/os-ticket-service-$(Build.BuildId).zip'
+              replaceExistingArchive: true
+            displayName: 'Zip Artifact'
+
+          - publish: $(Build.ArtifactStagingDirectory)/os-ticket-service-$(Build.BuildId).zip
+            artifact: os-ticket-service-artifact
+            displayName: 'Publish Artifact'
+
+  # -------------------------------------------------------------------------
+  # DEPLOYMENT STAGE (Enabled)
+  # -------------------------------------------------------------------------
+  - stage: Deploy
+    displayName: 'Deploy to Azure Function App'
+    dependsOn: Build_And_Test
+    condition: and(succeeded(), in(variables['Build.SourceBranch'],'refs/heads/develop2','refs/heads/release2'))
+    jobs:
+      - deployment: Deploy_Os_Ticket_Service
+        environment: '$(adoEnvironment)'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: os-ticket-service-artifact
+
+                - task: AzureFunctionApp@2
+                  inputs:
+                    connectedServiceNameARM: '$(azureSubscription)'
+                    appType: 'functionAppLinux'
+                    appName: '$(functionAppName)'
+                    package: '$(Pipeline.Workspace)/os-ticket-service-artifact/os-ticket-service-$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|24'
