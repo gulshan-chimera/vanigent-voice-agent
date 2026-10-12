@@ -98,7 +98,7 @@ export async function transferCall(
       body: JSON.stringify({
         type: "transfer",
         destination: { type: "number", number: e164 },
-        content: "Connecting your call now.",
+        content: `Transferring your call from this line to ${e164}. Please hold.`,
       }),
     });
 
@@ -118,7 +118,7 @@ export async function transferCall(
     context.log(`[TRANSFER-CALL] Transferred call to ${e164}.`);
     return {
       status: 200,
-      jsonBody: { results: [{ toolCallId, result: `Connecting you now.` }] },
+      jsonBody: { results: [{ toolCallId, result: `Transferring your call to ${e164}. Please hold.` }] },
     };
   } catch (error) {
     context.error(`[TRANSFER-CALL] Transfer error: ${(error as Error).message}`);
