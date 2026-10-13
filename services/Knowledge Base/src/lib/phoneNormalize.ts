@@ -1,24 +1,8 @@
-// src/lib/phoneNormalize.ts
-//
-// Turns a phone number into E.164, whether it arrives as digits or as
-// words. The assistant copies the number from the knowledge base result
-// into the transfer tool's argument, and that result is sometimes phrased
-// for speech ("eight four four, four four eight...") because the same
-// answer is read aloud to the caller. VAPI needs +18444480325.
-//
-// Also validates that the result is a genuine US number, so the transfer
-// can be refused server-side rather than dialling something malformed.
-
 const WORD_DIGITS: Record<string, string> = {
   zero: "0", oh: "0", one: "1", two: "2", three: "3",
   four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9",
 };
 
-/**
- * Extracts a single E.164 US number from a string in digit or spoken form.
- * Returns null if it can't find exactly one valid number — the caller
- * treats null as "refuse the transfer".
- */
 export function toE164US(raw: string): string | null {
   if (!raw) return null;
 
