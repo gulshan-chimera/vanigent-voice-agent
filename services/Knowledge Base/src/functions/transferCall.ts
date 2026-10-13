@@ -49,7 +49,7 @@ const DIGIT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seve
  */
 function spokenPhoneNumber(e164: string): string {
   const digits = e164.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
-  const say = (part: string) => part.split("").map((d) => DIGIT_WORDS[Number(d)]).join(", ");
+  const say = (part: string) => part.split("").map((d) => DIGIT_WORDS[Number(d)]).join(". ");
   if (digits.length !== 10) return say(digits);
   return `${say(digits.slice(0, 3))}. ${say(digits.slice(3, 6))}. ${say(digits.slice(6))}`;
 }
