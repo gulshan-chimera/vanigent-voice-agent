@@ -47,26 +47,26 @@ const DIGIT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seve
  * digits and between groups — no SSML needed. The +1 country code is
  * dropped, as people say US numbers without it.
  */
-// function spokenPhoneNumber(e164: string): string {
-//   const digits = e164.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
-//   const say = (part: string) => part.split("").map((d) => DIGIT_WORDS[Number(d)]).join(", ");
-//   if (digits.length !== 10) return say(digits);
-//   return `${say(digits.slice(0, 3))}. ${say(digits.slice(3, 6))}. ${say(digits.slice(6))}`;
-// }
-
-function slowNumber(e164: string): string {
-  const words = ['zero','one','two','three','four','five','six','seven','eight','nine'];
-  let digits = e164.replace(/\D/g, '');
-  if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
-  const groups = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6)];
-  return groups
-    .map(g => [...g].map(d => words[Number(d)]).join(', '))
-    .join(' ... ');
+function spokenPhoneNumber(e164: string): string {
+  const digits = e164.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+  const say = (part: string) => part.split("").map((d) => DIGIT_WORDS[Number(d)]).join(", ");
+  if (digits.length !== 10) return say(digits);
+  return `${say(digits.slice(0, 3))}. ${say(digits.slice(3, 6))}. ${say(digits.slice(6))}`;
 }
+
+// function slowNumber(e164: string): string {
+//   const words = ['zero','one','two','three','four','five','six','seven','eight','nine'];
+//   let digits = e164.replace(/\D/g, '');
+//   if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
+//   const groups = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6)];
+//   return groups
+//     .map(g => [...g].map(d => words[Number(d)]).join(', '))
+//     .join(' ... ');
+// }
 
 function transferMessage(supportName: string | null, e164: string): string {
   const who = supportName ? `the ${supportName}` : "our support team";
-  return `Transferring you now to ${who} at ${slowNumber(e164)}.`;
+  return `Transferring you now to ${who} at ${spokenPhoneNumber(e164)}.`;
 }
 
 export async function transferCall(
@@ -132,7 +132,7 @@ export async function transferCall(
           {
             toolCallId,
             result:
-              "I'm sorry, I couldn't transfer you — I didn't get a valid number to connect to. Is there something else I can help with?",
+              "",
           },
         ],
       },
@@ -155,7 +155,7 @@ export async function transferCall(
       body: JSON.stringify({
         type: "transfer",
         destination: { type: "number", number: e164 },
-        content: spokenMessage,
+        content: '',
       }),
     });
 
@@ -180,7 +180,7 @@ export async function transferCall(
           {
             toolCallId,
             result:
-              "TRANSFER_IN_PROGRESS. The caller has already heard the transfer announcement with the number. Do not say anything further and do not repeat the number.",
+              " ",
           },
         ],
       },
