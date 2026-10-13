@@ -8,7 +8,10 @@ export interface CreateTicketInput {
   /** Plain text. A ready-made data URL ("data:text/html,...") is passed through as-is. */
   message: string;
   phone?: string;
-  /** osTicket help topic ID, if tickets should be routed to a topic. */
+  /**
+   * osTicket help topic ID. The help topic decides the department
+   * (HR, IT, ...); without one osTicket uses its default topic.
+   */
   topicId?: number;
   /** Send staff alerts for this ticket (default true). */
   alert?: boolean;

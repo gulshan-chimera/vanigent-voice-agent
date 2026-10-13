@@ -4,8 +4,14 @@
 // Authorization: Bearer <OSTICKET_SERVICE_SECRET>
 //
 // Body (JSON):
-//   { "name", "email", "subject", "message",            ← required
-//     "phone", "topicId", "alert", "autorespond" }      ← optional
+//   { "name", "email", "subject", "message",                   ← required
+//     "phone", "topic", "topicId", "alert", "autorespond" }    ← optional
+//
+// The help topic routes the ticket to its department. Give either
+//   "topic"   – the topic name, e.g. "HR - Benefits" (resolved via the
+//               OSTICKET_HELP_TOPICS app setting, see lib/helpTopics.ts), or
+//   "topicId" – the raw osTicket help topic ID.
+// With neither, osTicket uses its default help topic.
 //
 // 201 → { success: true,  ticketNumber }
 // 4xx/5xx → { success: false, error }
@@ -13,13 +19,16 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { isRequestAuthorized } from "../lib/verifyRequestAuth";
 import { createTicket } from "../lib/osTicketClient";
+import { resolveTopicId } from "../lib/helpTopics";
 import { CreateTicketInput } from "../types/osTicket";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const LIMITS = { name: 128, email: 255, subject: 255, message: 20000, phone: 32 };
 
-function validate(body: unknown): { input: CreateTicketInput } | { errors: string[] } {
+type ValidationResult = { input: CreateTicketInput } | { errors: string[] } | { configError: string };
+
+function validate(body: unknown): ValidationResult {
   const b = (body ?? {}) as Record<string, unknown>;
   const errors: string[] = [];
 
@@ -62,6 +71,24 @@ function validate(body: unknown): { input: CreateTicketInput } | { errors: strin
     errors.push(`"topicId" must be a whole number.`);
   }
 
+  let topicId = b.topicId as number | undefined;
+  if (b.topic !== undefined && b.topic !== null && b.topic !== "") {
+    if (typeof b.topic !== "string") {
+      errors.push(`"topic" must be a string.`);
+    } else if (b.topicId !== undefined) {
+      errors.push(`Send either "topic" or "topicId", not both.`);
+    } else {
+      const lookup = resolveTopicId(b.topic);
+      if (lookup.ok) {
+        topicId = lookup.topicId;
+      } else if (lookup.reason === "not_configured") {
+        return { configError: `"topic" is not supported: OSTICKET_HELP_TOPICS is not configured.` };
+      } else {
+        errors.push(`Unknown "topic" "${b.topic}". Known topics: ${lookup.knownTopics.join(", ")}.`);
+      }
+    }
+  }
+
   if (errors.length > 0) return { errors };
 
   return {
@@ -71,7 +98,7 @@ function validate(body: unknown): { input: CreateTicketInput } | { errors: strin
       subject: subject!,
       message: message!,
       phone,
-      topicId: b.topicId as number | undefined,
+      topicId,
       alert: b.alert as boolean | undefined,
       autorespond: b.autorespond as boolean | undefined,
     },
@@ -95,6 +122,10 @@ export async function createTicketHandler(
   }
 
   const result = validate(body);
+  if ("configError" in result) {
+    context.error(`[CREATE-TICKET] ${result.configError}`);
+    return { status: 500, jsonBody: { success: false, error: result.configError } };
+  }
   if ("errors" in result) {
     return { status: 400, jsonBody: { success: false, error: "Validation failed.", details: result.errors } };
   }
