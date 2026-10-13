@@ -165,7 +165,15 @@ export async function transferCall(
     context.log(`[TRANSFER-CALL] Transferred call to ${supportName ?? "support"} at ${e164}.`);
     return {
       status: 200,
-      jsonBody: { results: [{ toolCallId, result: spokenMessage }] },
+      jsonBody: {
+        results: [
+          {
+            toolCallId,
+            result:
+              "TRANSFER_IN_PROGRESS. The caller has already heard the transfer announcement with the number. Do not say anything further and do not repeat the number.",
+          },
+        ],
+      },
     };
   } catch (error) {
     context.error(`[TRANSFER-CALL] Transfer error: ${(error as Error).message}`);
